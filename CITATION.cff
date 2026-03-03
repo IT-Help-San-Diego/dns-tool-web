@@ -3,7 +3,12 @@ title: "DNS Tool: Domain Security Audit Platform"
 message: "If you use DNS Tool in research, please cite it using the metadata below."
 version: "26.33.81"
 date-released: 2026-03-03
+
 doi: 10.5281/zenodo.18854899
+
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.18854899
 
 authors:
   - family-names: Balboa
