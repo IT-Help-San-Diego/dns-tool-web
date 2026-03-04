@@ -7,8 +7,8 @@ const INTEL_BRANCH = 'main';
 let connectionSettings = null;
 
 async function getAccessToken() {
-  if (connectionSettings && connectionSettings.settings.expires_at && new Date(connectionSettings.settings.expires_at).getTime() > Date.now()) {
-    return connectionSettings.settings.access_token;
+  if (connectionSettings?._cachedToken && connectionSettings._expiresAt > Date.now()) {
+    return connectionSettings._cachedToken;
   }
 
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
@@ -22,7 +22,7 @@ async function getAccessToken() {
     throw new Error('X_REPLIT_TOKEN not found');
   }
 
-  connectionSettings = await fetch(
+  const item = await fetch(
     'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=github',
     {
       headers: {
@@ -32,11 +32,15 @@ async function getAccessToken() {
     }
   ).then(res => res.json()).then(data => data.items?.[0]);
 
-  const accessToken = connectionSettings?.settings?.access_token || connectionSettings.settings?.oauth?.credentials?.access_token;
+  const accessToken = item?.settings?.access_token
+    || item?.settings?.oauth?.credentials?.access_token
+    || item?.oauth?.credentials?.access_token;
 
-  if (!connectionSettings || !accessToken) {
-    throw new Error('GitHub not connected');
+  if (!item || !accessToken) {
+    throw new Error('GitHub not connected — no access token found');
   }
+
+  connectionSettings = { _cachedToken: accessToken, _expiresAt: Date.now() + 30 * 60 * 1000 };
   return accessToken;
 }
 
