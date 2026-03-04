@@ -146,7 +146,6 @@ func TestLoad_BaseURL_Custom(t *testing.T) {
         setEnv(t, "SESSION_SECRET", "test-secret")
         setEnv(t, "BASE_URL", "https://dev.example.com")
         setEnv(t, "GOOGLE_REDIRECT_URL", "")
-        os.Unsetenv("REPLIT_DEV_DOMAIN")
 
         cfg, err := Load()
         if err != nil {
@@ -155,24 +154,23 @@ func TestLoad_BaseURL_Custom(t *testing.T) {
         if cfg.BaseURL != "https://dev.example.com" {
                 t.Errorf("expected custom base URL, got %s", cfg.BaseURL)
         }
-        if cfg.IsDevEnvironment != false {
-                t.Error("expected IsDevEnvironment=false without REPLIT_DEV_DOMAIN")
+        if cfg.IsDevEnvironment != true {
+                t.Error("expected IsDevEnvironment=true when BASE_URL differs from production URL")
         }
 }
 
-func TestLoad_IsDevEnvironment_ReplitDevDomain(t *testing.T) {
+func TestLoad_IsDevEnvironment_NonProdURL(t *testing.T) {
         setEnv(t, "DATABASE_URL", "postgres://test")
         setEnv(t, "SESSION_SECRET", "test-secret")
-        setEnv(t, "REPLIT_DEV_DOMAIN", "test.picard.replit.dev")
+        setEnv(t, "BASE_URL", "https://dev.dnstool.replit.dev")
 
         cfg, err := Load()
         if err != nil {
                 t.Fatalf("unexpected error: %v", err)
         }
         if cfg.IsDevEnvironment != true {
-                t.Error("expected IsDevEnvironment=true when REPLIT_DEV_DOMAIN is set")
+                t.Error("expected IsDevEnvironment=true when BASE_URL is not the production URL")
         }
-        t.Cleanup(func() { os.Unsetenv("REPLIT_DEV_DOMAIN") })
 }
 
 func TestLoad_GoogleRedirectURL_Override(t *testing.T) {
@@ -266,13 +264,26 @@ func TestLoad_IsDevEnvironment_EmptyBaseURL(t *testing.T) {
         setEnv(t, "DATABASE_URL", "postgres://test")
         setEnv(t, "SESSION_SECRET", "test-secret")
         os.Unsetenv("BASE_URL")
-        os.Unsetenv("REPLIT_DEV_DOMAIN")
 
         cfg, err := Load()
         if err != nil {
                 t.Fatalf("unexpected error: %v", err)
         }
         if cfg.IsDevEnvironment != false {
-                t.Error("expected IsDevEnvironment=false when REPLIT_DEV_DOMAIN is not set")
+                t.Error("expected IsDevEnvironment=false when BASE_URL defaults to production URL")
+        }
+}
+
+func TestLoad_IsDevEnvironment_ProdURL(t *testing.T) {
+        setEnv(t, "DATABASE_URL", "postgres://test")
+        setEnv(t, "SESSION_SECRET", "test-secret")
+        setEnv(t, "BASE_URL", "https://dnstool.it-help.tech")
+
+        cfg, err := Load()
+        if err != nil {
+                t.Fatalf("unexpected error: %v", err)
+        }
+        if cfg.IsDevEnvironment != false {
+                t.Error("expected IsDevEnvironment=false when BASE_URL matches production URL")
         }
 }

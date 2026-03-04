@@ -9,7 +9,7 @@ import (
 )
 
 var (
-        Version   = "26.33.81"
+        Version   = "26.33.82"
         GitCommit = "dev"
         BuildTime = "unknown"
 )
@@ -159,8 +159,7 @@ func resolveBaseURL() (string, bool) {
         if baseURL == "" {
                 baseURL = "https://dnstool.it-help.tech"
         }
-        replitDevDomain := os.Getenv("REPLIT_DEV_DOMAIN")
-        isDevEnv := replitDevDomain != ""
+        isDevEnv := baseURL != "https://dnstool.it-help.tech"
         return baseURL, isDevEnv
 }
 

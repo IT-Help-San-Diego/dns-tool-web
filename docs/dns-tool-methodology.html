@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>DNS Tool Methodology</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">DNS Tool Methodology</h1>
+</header>
+<h1
+id="dns-tool-confidence-scored-analysis-of-domain-security-infrastructure">DNS
+Tool: Confidence-Scored Analysis of Domain Security Infrastructure</h1>
+<p><strong>Carey James Balboa</strong> ORCID: <a
+href="https://orcid.org/0009-0000-5237-9065">0009-0000-5237-9065</a></p>
+<p>Version 26.33.82 DOI: <a
+href="https://doi.org/10.5281/zenodo.18854899">10.5281/zenodo.18854899</a></p>
+<hr />
+<h2 id="abstract">Abstract</h2>
+<p>DNS Tool is an open-source OSINT platform designed to analyze domain
+security posture using RFC-compliant signals from DNS and email
+authentication infrastructure. The system collects DNS records,
+evaluates configuration compliance with relevant RFC standards, and
+applies a confidence-scored interpretation model to produce structured
+security intelligence outputs.</p>
+<p>Unlike traditional scanners that report raw DNS results, DNS Tool
+emphasizes confidence scoring and reproducibility, enabling analysts to
+distinguish between verified security signals, ambiguous observations,
+and unsupported conclusions.</p>
+<p>The platform focuses on five major areas of domain security
+infrastructure:</p>
+<ul>
+<li>Email authentication (SPF, DKIM, DMARC)</li>
+<li>Transport security (MTA-STS, DANE)</li>
+<li>DNS integrity (DNSSEC validation)</li>
+<li>Brand protection indicators (BIMI)</li>
+<li>Domain configuration analysis (CAA, TLS-RPT)</li>
+</ul>
+<p>This document describes the methodology used by DNS Tool to transform
+raw DNS observations into structured intelligence outputs.</p>
+<hr />
+<h2 id="problem-statement">1. Problem Statement</h2>
+<p>Modern domain security analysis is fragmented across multiple
+DNS-based mechanisms defined by different RFC specifications.</p>
+<p>Examples include:</p>
+<ul>
+<li>SPF (RFC 7208)</li>
+<li>DKIM (RFC 6376)</li>
+<li>DMARC (RFC 7489)</li>
+<li>DNSSEC (RFC 4033–4035)</li>
+<li>MTA-STS (RFC 8461)</li>
+<li>DANE for SMTP (RFC 7672)</li>
+<li>BIMI (RFC 9495)</li>
+<li>TLS-RPT (RFC 8460)</li>
+<li>CAA (RFC 8659)</li>
+</ul>
+<p>Most existing tools present raw DNS data without distinguishing
+between valid security signals, partial configurations, ambiguous
+results, and misconfigurations.</p>
+<p>This creates a common problem for analysts: interpretation
+uncertainty.</p>
+<p>DNS Tool was developed to address this problem by introducing a
+structured evaluation process that:</p>
+<ol type="1">
+<li>Collects DNS evidence</li>
+<li>Verifies RFC compliance</li>
+<li>Applies a confidence model to interpretation</li>
+</ol>
+<hr />
+<h2 id="methodology">2. Methodology</h2>
+<p>The DNS Tool analysis pipeline consists of four stages:</p>
+<ol type="1">
+<li>Data acquisition</li>
+<li>RFC compliance evaluation</li>
+<li>Signal classification</li>
+<li>Confidence scoring</li>
+</ol>
+<p>These stages transform DNS observations into structured intelligence
+outputs.</p>
+<h3 id="data-acquisition">2.1 Data Acquisition</h3>
+<p>DNS Tool collects domain infrastructure signals using DNS queries and
+validation checks.</p>
+<p>Typical collected records include:</p>
+<ul>
+<li>TXT records (SPF, DMARC, BIMI)</li>
+<li>DKIM selector records</li>
+<li>MX records</li>
+<li>TLSA records</li>
+<li>DNSSEC chain data</li>
+<li>MTA-STS policy indicators</li>
+<li>CAA records</li>
+<li>TLS-RPT records</li>
+</ul>
+<p>Data collection emphasizes direct DNS observation rather than
+third-party interpretation. This ensures results are reproducible by
+independent analysts.</p>
+<h3 id="rfc-compliance-evaluation">2.2 RFC Compliance Evaluation</h3>
+<p>Each observed record is evaluated against its relevant
+specification.</p>
+<p>Examples include:</p>
+<p><strong>SPF evaluation:</strong> - Syntax validation - Mechanism
+parsing - Policy completeness</p>
+<p><strong>DMARC evaluation:</strong> - Policy presence - Alignment
+settings - Enforcement state</p>
+<p><strong>DNSSEC evaluation:</strong> - Chain integrity - Delegation
+signatures - Validation status</p>
+<p><strong>BIMI evaluation (RFC 9495):</strong> - SVG format enforcement
+- VMC certificate validation - DNS record structure</p>
+<p>Records that fail specification requirements are classified as
+non-compliant signals rather than silently ignored.</p>
+<h3 id="signal-classification">2.3 Signal Classification</h3>
+<p>After validation, signals are categorized into three groups:</p>
+<p><strong>Verified signals:</strong> Signals that meet RFC requirements
+and can be interpreted confidently.</p>
+<p><strong>Ambiguous signals:</strong> Signals that exist but cannot
+support strong conclusions.</p>
+<p><strong>Invalid signals:</strong> Configurations that violate
+specification rules.</p>
+<p>This classification prevents over-interpretation of incomplete
+configurations.</p>
+<h3 id="confidence-scoring">2.4 Confidence Scoring</h3>
+<p>DNS Tool assigns a confidence score to each interpreted signal.</p>
+<p>The scoring model reflects how strongly the DNS evidence supports the
+resulting claim.</p>
+<p>Confidence levels may represent:</p>
+<p><strong>High confidence:</strong> Evidence strongly supports the
+interpretation.</p>
+<p><strong>Moderate confidence:</strong> Evidence suggests the
+interpretation but contains uncertainty.</p>
+<p><strong>Low confidence:</strong> Evidence exists but cannot support a
+strong claim.</p>
+<p>Confidence scoring is intended to mirror analytical practices used in
+intelligence analysis frameworks such as ICD-203 analytic standards.</p>
+<hr />
+<h2 id="implementation-architecture">3. Implementation Architecture</h2>
+<p>The DNS Tool system consists of three major components:</p>
+<p><strong>Web interface:</strong> Provides interactive domain analysis
+and visualization.</p>
+<p><strong>Analysis engine:</strong> Processes DNS records and performs
+RFC validation.</p>
+<p><strong>Supporting intelligence modules:</strong> Generate structured
+intelligence outputs from analysis results.</p>
+<p>The implementation is written primarily in Go for the analysis engine
+with a web-based interface for user interaction. The system is designed
+to allow independent verification of DNS observations.</p>
+<p>Core research logic and internal analysis pipelines are maintained in
+private repositories for security and intellectual property
+protection.</p>
+<hr />
+<h2 id="limitations">4. Limitations</h2>
+<p>DNS Tool operates exclusively on publicly available DNS
+information.</p>
+<p>As a result, it cannot evaluate:</p>
+<ul>
+<li>Internal email infrastructure</li>
+<li>Private key security</li>
+<li>Server-side enforcement mechanisms</li>
+</ul>
+<p>The tool therefore focuses on observable infrastructure posture
+rather than complete operational security evaluation.</p>
+<p>Additionally, DNS observations may change over time, meaning results
+represent the configuration state at the time of analysis.</p>
+<hr />
+<h2 id="reproducibility">5. Reproducibility</h2>
+<p>All DNS signals used by DNS Tool are publicly observable and can be
+independently verified using standard DNS queries.</p>
+<p>This design supports reproducibility and transparency in security
+analysis.</p>
+<p>Source code and methodology are available at:
+https://github.com/careyjames/dns-tool-web</p>
+<hr />
+<h2 id="citation">6. Citation</h2>
+<p>If DNS Tool contributes to research or analysis, please cite:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bibtex"><code class="sourceCode bibtex"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co">@software{balboa2026dnstool,</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="co">  author = {Balboa, Carey James},</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="co">  title = {DNS Tool: Domain Security Audit Platform},</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co">  year = {2026},</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="co">  version = {26.33.82},</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="co">  doi = {10.5281/zenodo.18854899},</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="co">  url = {https://dnstool.it-help.tech},</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="co">  license = {BSL-1.1}</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="co">}</span></span></code></pre></div>
+<hr />
+<p><em>DNS Tool v26.33.82 · IT Help San Diego Inc. · Licensed under
+BSL-1.1</em> <em>DOI: 10.5281/zenodo.18854899</em></p>
+</body>
+</html>

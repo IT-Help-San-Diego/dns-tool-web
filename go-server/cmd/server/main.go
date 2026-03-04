@@ -115,6 +115,13 @@ func main() {
         }
         router.GET("/favicon.ico", faviconHandler)
         router.HEAD("/favicon.ico", faviconHandler)
+        methodologyPDF := func(c *gin.Context) {
+                c.Header(headerCacheControl, "public, max-age=86400")
+                c.Header("Content-Disposition", "inline; filename=\"dns-tool-methodology.pdf\"")
+                c.File(filepath.Join(findDocsDir(), "dns-tool-methodology.pdf"))
+        }
+        router.GET("/docs/dns-tool-methodology.pdf", methodologyPDF)
+        router.HEAD("/docs/dns-tool-methodology.pdf", methodologyPDF)
 
         dnsAnalyzer := analyzer.New()
         dnsAnalyzer.SMTPProbeMode = cfg.SMTPProbeMode
@@ -396,6 +403,21 @@ func isStaticAsset(fp string) bool {
                 }
         }
         return false
+}
+
+func findDocsDir() string {
+        candidates := []string{
+                "docs",
+                "go-server/../docs",
+                "../docs",
+        }
+        for _, c := range candidates {
+                if info, err := os.Stat(c); err == nil && info.IsDir() {
+                        return c
+                }
+        }
+        slog.Warn("Docs directory not found, using default")
+        return "docs"
 }
 
 func findStaticDir() string {
