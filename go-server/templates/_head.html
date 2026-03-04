@@ -1,0 +1,70 @@
+{{define "head"}}
+<script nonce="{{.CspNonce}}">try{if(localStorage.getItem('covertMode')==='1')document.documentElement.classList.add('covert-mode')}catch{/* intentional */}</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#212529">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DNS Tool">
+<meta name="format-detection" content="telephone=no">
+{{if .CsrfToken}}<meta name="csrf-token" content="{{.CsrfToken}}">{{end}}
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{.AppVersion}}">
+<link rel="icon" type="image/png" sizes="48x48" href="/static/icons/favicon-48x48.png?v={{.AppVersion}}">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32x32.png?v={{.AppVersion}}">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16x16.png?v={{.AppVersion}}">
+<link rel="shortcut icon" href="/static/favicon.png?v={{.AppVersion}}">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-180x180.png">
+<link rel="apple-touch-icon" sizes="167x167" href="/static/icons/apple-touch-icon-167x167.png">
+<link rel="apple-touch-icon" sizes="152x152" href="/static/icons/apple-touch-icon-152x152.png">
+<link rel="apple-touch-icon" sizes="120x120" href="/static/icons/apple-touch-icon-120x120.png">
+<link rel="apple-touch-startup-image" media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)" href="/static/icons/splash/splash-1290x2796.png">
+<link rel="apple-touch-startup-image" media="(device-width:393px) and (device-height:852px) and (-webkit-device-pixel-ratio:3)" href="/static/icons/splash/splash-1179x2556.png">
+<link rel="apple-touch-startup-image" media="(device-width:390px) and (device-height:844px) and (-webkit-device-pixel-ratio:3)" href="/static/icons/splash/splash-1170x2532.png">
+<link rel="apple-touch-startup-image" media="(device-width:375px) and (device-height:812px) and (-webkit-device-pixel-ratio:3)" href="/static/icons/splash/splash-1125x2436.png">
+<link rel="apple-touch-startup-image" media="(device-width:414px) and (device-height:896px) and (-webkit-device-pixel-ratio:3)" href="/static/icons/splash/splash-1242x2688.png">
+<link rel="apple-touch-startup-image" media="(device-width:414px) and (device-height:896px) and (-webkit-device-pixel-ratio:2)" href="/static/icons/splash/splash-828x1792.png">
+<link rel="apple-touch-startup-image" media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)" href="/static/icons/splash/splash-750x1334.png">
+<link rel="apple-touch-startup-image" media="(device-width:768px) and (device-height:1024px) and (-webkit-device-pixel-ratio:2)" href="/static/icons/splash/splash-1024x1366.png">
+<link rel="apple-touch-startup-image" media="(device-width:834px) and (device-height:1194px) and (-webkit-device-pixel-ratio:2)" href="/static/icons/splash/splash-1668x2388.png">
+<link rel="apple-touch-startup-image" media="(device-width:1024px) and (device-height:1366px) and (-webkit-device-pixel-ratio:2)" href="/static/icons/splash/splash-2048x2732.png">
+{{end}}
+
+{{define "head_css"}}
+<link rel="preload" href="{{staticVersionURL "css/custom.min.css" .AppVersion}}" as="style">
+<link rel="preload" href="/static/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{staticVersionURL "css/foundation.min.css" .AppVersion}}">
+<link href="{{staticVersionURL "css/custom.min.css" .AppVersion}}" rel="stylesheet">
+<link rel="stylesheet" href="{{staticVersionURL "css/fontawesome-subset.min.css" .AppVersion}}">
+{{end}}
+
+{{define "head_katex"}}
+<link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<script defer nonce="{{.CspNonce}}" src="/static/vendor/katex/katex.min.js"></script>
+<script defer nonce="{{.CspNonce}}" src="/static/vendor/katex/auto-render.min.js"></script>
+<script nonce="{{.CspNonce}}">
+document.addEventListener("DOMContentLoaded",function(){if(typeof renderMathInElement==="function"){renderMathInElement(document.body,{delimiters:[{left:"$$",right:"$$",display:true},{left:String.raw`\(`,right:String.raw`\)`,display:false}],throwOnError:false})}});
+</script>
+{{end}}
+
+{{define "critical_css"}}
+<style nonce="{{.CspNonce}}">
+*,::after,::before{box-sizing:border-box}
+html.covert-mode,html.covert-mode body{background-color:#0a0c10!important}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background-color:#0d1117;color:rgba(230,237,243,0.9);line-height:1.5;-webkit-font-smoothing:antialiased}
+.navbar{display:flex;flex-wrap:wrap;padding:.5rem 1rem;background-color:#0d1117}
+.navbar>.container{display:flex;flex-wrap:nowrap;align-items:center;justify-content:space-between}
+.navbar-brand{color:#fff;text-decoration:none;font-size:1.25rem;padding:.3125rem 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1}
+.container{width:100%;max-width:1140px;margin:0 auto;padding:0 .75rem}
+.u-nav-controls{flex-shrink:0}
+.card{background-color:#21262d;border:1px solid #30363d;border-radius:.375rem}
+.card-body{padding:1rem}
+.badge{display:inline-block;padding:.35em .65em;font-size:.75em;font-weight:700;border-radius:.25rem}
+.fas,.fab,.far,.fa{display:inline-block;font-style:normal;font-variant:normal;text-rendering:auto;-webkit-font-smoothing:antialiased;font-family:"Font Awesome 6 Free",sans-serif;font-weight:900;line-height:1}
+.d-none{display:none}
+.collapse:not(.show){display:none}
+</style>
+{{end}}

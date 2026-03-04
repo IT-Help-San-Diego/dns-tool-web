@@ -1,0 +1,66 @@
+.DS_Store
+**/.DS_Store
+attached_assets/
+__pycache__/
+*.pyc
+.pythonlibs/
+.cache/
+node_modules/
+dns-tool
+dns-tool-server
+dns-tool-server-new
+go-server/server
+go-server/dnstool
+server
+replit.md
+docs/legacy/src/
+docs/legacy/tests/
+docs/legacy/migrations/
+
+# Build artifacts
+coverage.out
+*.out
+
+# Database files — never commit data
+instance/
+
+# Generated assets
+generated-icon.png
+
+# Git panel sync marker (agent-written, not for version control)
+.gitpanel/
+
+# Drift Cairn manifests (internal dev drift detection — local only)
+# NOTE: If .drift/manifest.json shows in git status, untrack it from Shell:
+#   git rm --cached .drift/manifest.json
+.drift/
+
+# SonarCloud scanner work directory (temp artifacts, binaries)
+.scannerwork/
+
+# Agent skills and internal docs — local only, never public
+.agents/
+.local/skills/
+
+# Internal project documentation — development context, never public
+# NOTE: If these show in git status after adding here, untrack from Shell:
+#   git rm --cached EVOLUTION.md PROJECT_CONTEXT.md
+EVOLUTION.md
+PROJECT_CONTEXT.md
+
+# Figma asset bundle exports — generated, not versioned
+exports/
+
+# Private repo staging — never push to public
+dnstool-intel-staging/
+
+# Git backups (created by recovery scripts)
+.git.backup*/
+
+# Test binaries
+*.test
+analyzer.test
+
+# Go build artifacts in subfolders
+go-server/dns-tool-server
+go-server/dns-tool

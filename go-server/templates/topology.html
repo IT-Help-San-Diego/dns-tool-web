@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    {{template "head" .}}
+    {{template "head_css" .}}
+    <title>Protocol Topology — DNS Tool</title>
+    <meta name="robots" content="noindex, nofollow">
+    <meta property="og:url" content="https://dnstool.it-help.tech/topology">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Protocol Topology — DNS Tool">
+    <meta property="og:description" content="Interactive system architecture diagram showing DNS Tool protocol analysis topology.">
+    <meta property="og:image" content="https://dnstool.it-help.tech/static/images/og-image.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Protocol Topology — DNS Tool">
+    <meta name="twitter:description" content="Interactive system architecture diagram showing DNS Tool protocol analysis topology.">
+    <meta name="twitter:image" content="https://dnstool.it-help.tech/static/images/og-image.png">
+    <style nonce="{{.CspNonce}}">
+        .topo-canvas-wrap {
+            position: relative;
+            width: 100%;
+            height: calc(100vh - 80px);
+            min-height: 750px;
+            overflow: hidden;
+            background: #070a0f;
+            border-radius: 8px;
+        }
+        .topo-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .u-privacy-banner { display: none !important; }
+        .topo-legend {
+            position: absolute;
+            bottom: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(7, 10, 15, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 5px;
+            padding: 6px 18px;
+            font-size: 0.72rem;
+            color: #8b9aad;
+            backdrop-filter: blur(8px);
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+        .topo-legend-section {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+        .topo-legend-section:last-child { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+        .topo-legend-label {
+            font-size: 0.62rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #5a6878;
+            margin-bottom: 2px;
+        }
+        .topo-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 1px;
+            line-height: 1.2;
+        }
+        .topo-legend-item:last-child { margin-bottom: 0; }
+        .topo-legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .topo-legend-rect {
+            width: 10px;
+            height: 6px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+        .topo-title-overlay {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+        }
+        .topo-title-overlay strong {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.95rem;
+            display: block;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    {{template "nav" .}}
+    <main id="main-content">
+        <div class="container-fluid px-3 py-3">
+            <div class="topo-canvas-wrap" id="topoWrap">
+                <canvas id="topoCanvas"></canvas>
+                <div class="topo-title-overlay">
+                    <strong>Intelligence Topology</strong>
+                    DNS Security Pipeline &amp; Dependency Graph
+                </div>
+                <div class="topo-legend">
+                    <div class="topo-legend-section">
+                        <div class="topo-legend-label">Intelligence Sources</div>
+                        <div class="topo-legend-item"><span class="topo-legend-rect" style="background:#5c6bc0"></span> DNS Infrastructure</div>
+                        <div class="topo-legend-item"><span class="topo-legend-rect" style="background:#78909c"></span> External Intelligence</div>
+                    </div>
+                    <div class="topo-legend-section">
+                        <div class="topo-legend-label">Protocol Analysis</div>
+                        <div class="topo-legend-item"><span class="topo-legend-dot" style="background:#4fc3f7"></span> Email Authentication</div>
+                        <div class="topo-legend-item"><span class="topo-legend-dot" style="background:#81c784"></span> Transport Security</div>
+                        <div class="topo-legend-item"><span class="topo-legend-dot" style="background:#ffb74d"></span> Policy &amp; Trust</div>
+                        <div class="topo-legend-item"><span class="topo-legend-dot" style="background:#ce93d8"></span> Brand Verification</div>
+                    </div>
+                    <div class="topo-legend-section">
+                        <div class="topo-legend-label">Data Flow</div>
+                        <div class="topo-legend-item"><span style="color:rgba(255,255,255,0.3);">&#9472;&#9472;&#9654;</span> Query / response</div>
+                        <div class="topo-legend-item"><span style="color:rgba(255,255,255,0.2);">&#9476;&#9476;&#9655;</span> Dependency</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    {{template "footer" .}}
+    {{template "scripts" .}}
+    <script nonce="{{.CspNonce}}">
+    (function() {
+        'use strict';
+
+        var canvas = document.getElementById('topoCanvas');
+        var wrap = document.getElementById('topoWrap');
+        if (!canvas || !wrap) return;
+        var ctx = canvas.getContext('2d');
+        var dpr = window.devicePixelRatio || 1;
+        var W, H;
+
+        function resize() {
+            var rect = wrap.getBoundingClientRect();
+            W = rect.width;
+            H = rect.height;
+            canvas.width = W * dpr;
+            canvas.height = H * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            layoutAll();
+        }
+
+        var COLORS = {
+            email: '#4fc3f7',
+            transport: '#81c784',
+            policy: '#ffb74d',
+            brand: '#ce93d8',
+            source: '#5c6bc0',
+            intel: '#78909c',
+            engine: '#e0e0e0',
+            storage: '#ff8a65',
+            output: '#90caf9'
+        };
+
+        function hexToRgba(hex, a) {
+            var r = parseInt(hex.slice(1, 3), 16);
+            var g = parseInt(hex.slice(3, 5), 16);
+            var b = parseInt(hex.slice(5, 7), 16);
+            return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+        }
+
+        var RESOLVER_TAGS = [
+            { name: 'Cloudflare', abbr: 'CF', color: '#f6821f' },
+            { name: 'Google',     abbr: 'G',  color: '#4285f4' },
+            { name: 'Quad9',      abbr: 'Q9', color: '#0078d4' },
+            { name: 'OpenDNS',    abbr: 'OD', color: '#ff6a00' },
+            { name: 'DNS4EU',     abbr: 'EU', color: '#003399' }
+        ];
+
+        var SOURCES = [
+            { id: 'resolvers', label: 'DNS Resolvers',   sub: 'Cloudflare · Google · Quad9\nOpenDNS · DNS4EU', color: COLORS.source, zone: 'source', resolverTags: RESOLVER_TAGS },
+            { id: 'root',      label: 'Root / TLD',      sub: 'IANA Root Zone\nTLD Registries',                  color: COLORS.source, zone: 'source' },
+            { id: 'rdap',      label: 'RDAP / WHOIS',    sub: 'Registration Data\nAccess Protocol',              color: COLORS.intel,  zone: 'source' },
+            { id: 'ietf',      label: 'IETF Metadata',   sub: 'RFC Status · Errata\nDraft Tracker',              color: COLORS.intel,  zone: 'source' },
+            { id: 'ct',        label: 'CT / Subdomains', sub: 'crt.sh · Certspotter\nTransparency Logs',          color: COLORS.intel,  zone: 'source' },
+            { id: 'cisa',      label: 'CISA / Threat',   sub: 'BOD 19-02\nIP Scanner Detection',                 color: COLORS.intel,  zone: 'source' },
+            { id: 'probes',    label: 'Probe Fleet',     sub: 'SMTP · DANE · TLS\nNmap · testssl.sh',            color: COLORS.source, zone: 'source' }
+        ];
+
+        var ENGINE = { id: 'engine', label: 'ICIE', sub: 'Analysis Engine', color: COLORS.engine, zone: 'engine', x: 0, y: 0, targetX: 0, targetY: 0, radius: 58, _initialized: false };
+
+        var CONFIDENCE = [
+            { id: 'icae', label: 'ICAE', sub: 'Accuracy Audit',  color: '#ef9a9a', zone: 'confidence' },
+            { id: 'icuae', label: 'ICuAE', sub: 'Currency Audit', color: '#a5d6a7', zone: 'confidence' },
+            { id: 'ede', label: 'EDE', sub: 'Epistemic Disclosure\nEvents', color: '#ffab91', zone: 'confidence' }
+        ];
+
+        var STORAGE = [
+            { id: 'postgres',  label: 'PostgreSQL',     sub: 'Scan Results · History\nDrift · Analytics',      color: COLORS.storage, zone: 'storage' },
+            { id: 'fixtures',  label: 'Golden Fixtures', sub: 'Known-Good Baselines\nRFC Compliance Seeds',    color: '#ffcc80',       zone: 'storage' }
+        ];
+
+        var ACTIONS = [
+            { id: 'act_persist',   label: 'persist',    color: 'rgba(255,255,255,0.5)', zone: 'action' },
+            { id: 'act_seeds',     label: 'seeds',      color: 'rgba(255,255,255,0.5)', zone: 'action' }
+        ];
+
+        var OUTPUTS = [
+            { id: 'reports',   label: 'Reports',        sub: 'Engineer · Executive\nRecon · Comparison',       color: COLORS.output, zone: 'output' },
+            { id: 'jsonapi',   label: 'JSON API',       sub: 'Analysis · Checksums\nSubdomains · Health',      color: COLORS.output, zone: 'output' },
+            { id: 'seo',       label: 'Schema.org',     sub: 'JSON-LD Structured Data\nGoogle · Rich Results',  color: COLORS.output, zone: 'output' },
+            { id: 'badges',    label: 'SVG Badges',     sub: 'Posture Indicators\nEmbeddable',                 color: COLORS.output, zone: 'output' }
+        ];
+
+        var PROTOCOLS = [
+            { id: 'spf',     label: 'SPF',      rfc: '7208',  cat: 'email' },
+            { id: 'dkim',    label: 'DKIM',      rfc: '6376',  cat: 'email' },
+            { id: 'dmarc',   label: 'DMARC',     rfc: '7489',  cat: 'email' },
+            { id: 'dnssec',  label: 'DNSSEC',    rfc: '4035',  cat: 'policy' },
+            { id: 'dane',    label: 'DANE',      rfc: '6698',  cat: 'transport' },
+            { id: 'mtasts',  label: 'MTA-STS',   rfc: '8461',  cat: 'transport' },
+            { id: 'tlsrpt',  label: 'TLS-RPT',   rfc: '8460',  cat: 'transport' },
+            { id: 'bimi',    label: 'BIMI',      rfc: 'draft', cat: 'brand' },
+            { id: 'caa',     label: 'CAA',       rfc: '8659',  cat: 'policy' }
+        ];
+
+        var PROTO_EDGES = [
+            { from: 'dmarc', to: 'spf',    type: 'hard',  label: 'alignment',     labelT: 0.45 },
+            { from: 'dmarc', to: 'dkim',   type: 'hard',  label: 'alignment',     labelT: 0.45 },
+            { from: 'dane',  to: 'dnssec', type: 'hard',  label: 'requires',      labelT: 0.35 },
+            { from: 'bimi',  to: 'dmarc',  type: 'hard',  label: 'p=quarantine+', labelT: 0.5 },
+            { from: 'tlsrpt', to: 'mtasts', type: 'soft', label: 'reports',       labelT: 0.5 },
+            { from: 'tlsrpt', to: 'dane',  type: 'soft',  label: 'reports',       labelT: 0.4 },
+            { from: 'caa',   to: 'dnssec', type: 'soft',  label: 'strengthens',   labelT: 0.5 }
+        ];
+
+        var allNodes = {};
+
+        SOURCES.forEach(function(s) {
+            s.x = 0; s.y = 0; s.targetX = 0; s.targetY = 0;
+            s.radius = 34; s._initialized = false;
+            s.shape = 'rect';
+            allNodes[s.id] = s;
+        });
+
+        CONFIDENCE.forEach(function(c) {
+            c.x = 0; c.y = 0; c.targetX = 0; c.targetY = 0;
+            c.radius = (c.id === 'ede') ? 54 : 48;
+            c._initialized = false;
+            c.shape = 'diamond';
+            allNodes[c.id] = c;
+        });
+
+        STORAGE.forEach(function(s) {
+            s.x = 0; s.y = 0; s.targetX = 0; s.targetY = 0;
+            s.radius = (s.id === 'fixtures') ? 38 : 40;
+            s._initialized = false;
+            s.shape = 'cylinder';
+            allNodes[s.id] = s;
+        });
+
+        ACTIONS.forEach(function(a) {
+            a.x = 0; a.y = 0; a.targetX = 0; a.targetY = 0;
+            a.radius = 18; a._initialized = false;
+            a.shape = 'pill';
+            allNodes[a.id] = a;
+        });
+
+        OUTPUTS.forEach(function(o) {
+            o.x = 0; o.y = 0; o.targetX = 0; o.targetY = 0;
+            o.radius = 40; o._initialized = false;
+            o.shape = 'hexagon';
+            allNodes[o.id] = o;
+        });
+
+        allNodes[ENGINE.id] = ENGINE;
+
+        PROTOCOLS.forEach(function(p) {
+            p.x = 0; p.y = 0; p.targetX = 0; p.targetY = 0;
+            p.radius = 40;
+            p.color = COLORS[p.cat];
+            p.shape = 'circle';
+            p._initialized = false;
+            p.zone = 'protocol';
+            allNodes[p.id] = p;
+        });
+
+        var FLOW_EDGES = [];
+        SOURCES.forEach(function(s) {
+            FLOW_EDGES.push({ from: s.id, to: 'engine', type: 'flow', label: '' });
+        });
+        FLOW_EDGES.push({ from: 'engine', to: 'icae', type: 'flow', label: '' });
+        FLOW_EDGES.push({ from: 'engine', to: 'icuae', type: 'flow', label: '' });
+        FLOW_EDGES.push({ from: 'icae', to: 'ede', type: 'flow', label: 'discloses' });
+        FLOW_EDGES.push({ from: 'icuae', to: 'ede', type: 'flow', label: 'discloses' });
+        FLOW_EDGES.push({ from: 'engine', to: 'act_persist', type: 'flow', label: '' });
+        FLOW_EDGES.push({ from: 'act_persist', to: 'postgres', type: 'flow', label: '' });
+        FLOW_EDGES.push({ from: 'postgres', to: 'act_seeds', type: 'flow', label: '' });
+        FLOW_EDGES.push({ from: 'act_seeds', to: 'fixtures', type: 'flow', label: '' });
+        PROTOCOLS.forEach(function(p) {
+            FLOW_EDGES.push({ from: 'engine', to: p.id, type: 'flow', label: '' });
+        });
+        OUTPUTS.forEach(function(o) {
+            FLOW_EDGES.push({ from: 'engine', to: o.id, type: 'flow', label: '' });
+        });
+        FLOW_EDGES.push({ from: 'postgres', to: 'reports', type: 'flow', label: 'history' });
+
+        function effRadius(n) {
+            var hw = (n._drawW || n.radius * 2.2) / 2;
+            var hh = (n._drawH || n.radius * 1.4) / 2;
+            return Math.max(hw, hh, n.radius) + 6;
+        }
+
+        function separateNodes(nodes, minPad) {
+            for (var iter = 0; iter < 4; iter++) {
+                for (var i = 0; i < nodes.length; i++) {
+                    for (var j = i + 1; j < nodes.length; j++) {
+                        var a = nodes[i], b = nodes[j];
+                        var dx = b.targetX - a.targetX;
+                        var dy = b.targetY - a.targetY;
+                        var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                        var minDist = effRadius(a) + effRadius(b) + minPad;
+                        if (dist < minDist) {
+                            var push = (minDist - dist) / 2;
+                            var nx = dx / dist, ny = dy / dist;
+                            a.targetX -= nx * push;
+                            a.targetY -= ny * push;
+                            b.targetX += nx * push;
+                            b.targetY += ny * push;
+                        }
+                    }
+                }
+            }
+        }
+
+        function layoutAll() {
+            var padX = W * 0.04;
+            var titleSafe = Math.max(H * 0.12, 70);
+            var legendSafe = H * 0.88;
+
+            var srcZone  = { x0: padX, x1: W * 0.14, y0: titleSafe, y1: H * 0.72 };
+            var engZone  = { x0: W * 0.17, x1: W * 0.40, y0: titleSafe, y1: legendSafe };
+            var protoZone = { x0: W * 0.42, x1: W * 0.76, y0: titleSafe, y1: legendSafe - H * 0.06 };
+            var outZone  = { x0: W * 0.80, x1: W - padX, y0: titleSafe, y1: H * 0.72 };
+
+            var engW = engZone.x1 - engZone.x0;
+            var engH = engZone.y1 - engZone.y0;
+            var engCx = (engZone.x0 + engZone.x1) / 2;
+
+            var srcCx = (srcZone.x0 + srcZone.x1) / 2;
+            var srcSpacing = (srcZone.y1 - srcZone.y0) / (SOURCES.length - 1);
+            SOURCES.forEach(function(s, i) {
+                s.targetX = srcCx;
+                s.targetY = srcZone.y0 + i * srcSpacing;
+                if (!s._initialized) { s.x = s.targetX - 30; s.y = s.targetY; s._initialized = true; }
+            });
+
+            ENGINE.targetX = engCx;
+            ENGINE.targetY = engZone.y0 + engH * 0.14;
+            if (!ENGINE._initialized) { ENGINE.x = ENGINE.targetX; ENGINE.y = ENGINE.targetY; ENGINE._initialized = true; }
+
+            var confY = engZone.y0 + engH * 0.38;
+            var confSpread = engW * 0.22;
+            var confMinX = engZone.x0 + engW * 0.18;
+            CONFIDENCE[0].targetX = Math.max(engCx - confSpread, confMinX);
+            CONFIDENCE[0].targetY = confY;
+            CONFIDENCE[1].targetX = engCx + confSpread;
+            CONFIDENCE[1].targetY = confY;
+            CONFIDENCE[2].targetX = engCx;
+            CONFIDENCE[2].targetY = confY + engH * 0.12;
+            CONFIDENCE.forEach(function(c) {
+                if (!c._initialized) { c.x = c.targetX; c.y = c.targetY; c._initialized = true; }
+            });
+
+            var storeY = engZone.y0 + engH * 0.75;
+            var storeSpread = engW * 0.22;
+            STORAGE[0].targetX = engCx + storeSpread;
+            STORAGE[0].targetY = storeY;
+            STORAGE[1].targetX = engCx - storeSpread;
+            STORAGE[1].targetY = storeY;
+            STORAGE.forEach(function(s) {
+                if (!s._initialized) { s.x = s.targetX; s.y = s.targetY; s._initialized = true; }
+            });
+
+            separateNodes(CONFIDENCE.concat(STORAGE), 16);
+
+            CONFIDENCE.forEach(function(c) {
+                c.targetX = Math.max(c.targetX, engZone.x0 + 50);
+                c.targetX = Math.min(c.targetX, engZone.x1 - 30);
+            });
+
+            function placeAction(id, fromId, toId, offX, offY) {
+                var a = allNodes[fromId], b = allNodes[toId];
+                var n = allNodes[id];
+                n.targetX = (a.targetX + b.targetX) / 2 + (offX || 0);
+                n.targetY = (a.targetY + b.targetY) / 2 + (offY || 0);
+                if (!n._initialized) { n.x = n.targetX; n.y = n.targetY; n._initialized = true; }
+            }
+
+            placeAction('act_persist', 'engine', 'postgres', engW * 0.25, -engH * 0.06);
+            placeAction('act_seeds', 'postgres', 'fixtures', 0, -8);
+
+            var protoW = protoZone.x1 - protoZone.x0;
+            var protoH = protoZone.y1 - protoZone.y0;
+            var protoCx = (protoZone.x0 + protoZone.x1) / 2;
+            var protoCy = (protoZone.y0 + protoZone.y1) / 2 + H * 0.03;
+            var protoR = Math.min(protoW * 0.40, protoH * 0.40);
+
+            var angleMap = [-130, -90, -50, 30, 70, 150, 190, -10, 110];
+            PROTOCOLS.forEach(function(p, i) {
+                var a = angleMap[i] * Math.PI / 180;
+                p.targetX = protoCx + protoR * Math.cos(a);
+                p.targetY = protoCy + protoR * Math.sin(a);
+                p.targetY = Math.max(p.targetY, titleSafe + p.radius);
+                p.targetY = Math.min(p.targetY, legendSafe - p.radius);
+                if (!p._initialized) { p.x = p.targetX; p.y = p.targetY; p._initialized = true; }
+            });
+
+            var outCx = (outZone.x0 + outZone.x1) / 2;
+            var outSpacing = (outZone.y1 - outZone.y0) / (OUTPUTS.length - 1);
+            OUTPUTS.forEach(function(o, i) {
+                o.targetX = outCx;
+                o.targetY = outZone.y0 + i * outSpacing;
+                if (!o._initialized) { o.x = o.targetX + 20; o.y = o.targetY; o._initialized = true; }
+            });
+        }
+
+        var AMBIENT_COUNT = 60;
+        var ambientParticles = [];
+        function initAmbient() {
+            ambientParticles = [];
+            for (var i = 0; i < AMBIENT_COUNT; i++) {
+                ambientParticles.push({
+                    x: Math.random() * (W || 1200),
+                    y: Math.random() * (H || 700),
+                    vx: (Math.random() - 0.5) * 0.2,
+                    vy: (Math.random() - 0.5) * 0.15 + 0.03,
+                    size: Math.random() * 1.2 + 0.3,
+                    alpha: Math.random() * 0.15 + 0.03
+                });
+            }
+        }
+
+        var flowParticles = [];
+        function initFlowParticles() {
+            flowParticles = [];
+            FLOW_EDGES.forEach(function(e) {
+                var count = e.from === 'engine' && allNodes[e.to] && allNodes[e.to].zone === 'protocol' ? 2 : 3;
+                for (var i = 0; i < count; i++) {
+                    flowParticles.push({
+                        edge: e,
+                        t: Math.random(),
+                        speed: 0.0015 + Math.random() * 0.003,
+                        size: 2,
+                        alpha: 0.5
+                    });
+                }
+            });
+            PROTO_EDGES.forEach(function(e) {
+                for (var i = 0; i < 2; i++) {
+                    flowParticles.push({
+                        edge: e,
+                        t: Math.random(),
+                        speed: 0.002 + Math.random() * 0.002,
+                        size: 1.8,
+                        alpha: 0.4
+                    });
+                }
+            });
+        }
+
+        var hoverNode = null;
+        var mouseX = -1, mouseY = -1;
+
+        function hitTest(mx, my) {
+            var allArr = SOURCES.concat(CONFIDENCE, STORAGE, ACTIONS, OUTPUTS, PROTOCOLS, [ENGINE]);
+            for (var i = 0; i < allArr.length; i++) {
+                var n = allArr[i];
+                var dx = mx - n.x;
+                var dy = my - n.y;
+                var hr = n.radius + 12;
+                if (dx * dx + dy * dy < hr * hr) return n;
+            }
+            return null;
+        }
+
+        canvas.addEventListener('mousemove', function(ev) {
+            var rect = canvas.getBoundingClientRect();
+            mouseX = ev.clientX - rect.left;
+            mouseY = ev.clientY - rect.top;
+            hoverNode = hitTest(mouseX, mouseY);
+            canvas.style.cursor = hoverNode ? 'pointer' : 'default';
+        });
+
+        canvas.addEventListener('mouseleave', function() {
+            mouseX = -1; mouseY = -1; hoverNode = null;
+            canvas.style.cursor = 'default';
+        });
+
+        var time = 0;
+
+        function update() {
+            time += 0.016;
+            var allArr = SOURCES.concat(CONFIDENCE, STORAGE, OUTPUTS, PROTOCOLS, [ENGINE]);
+            allArr.forEach(function(n) {
+                var bx = Math.sin(time * 0.3 + (n.targetX * 0.01)) * 2;
+                var by = Math.cos(time * 0.25 + (n.targetY * 0.01)) * 1.5;
+                n.x += (n.targetX + bx - n.x) * 0.04;
+                n.y += (n.targetY + by - n.y) * 0.04;
+            });
+
+            ambientParticles.forEach(function(ap) {
+                ap.x += ap.vx;
+                ap.y += ap.vy;
+                if (ap.x < 0) ap.x = W;
+                if (ap.x > W) ap.x = 0;
+                if (ap.y < 0) ap.y = H;
+                if (ap.y > H) ap.y = 0;
+            });
+
+            flowParticles.forEach(function(fp) {
+                fp.t += fp.speed;
+                if (fp.t > 1) fp.t -= 1;
+            });
+        }
+
+        function getNodeBoundary(node, targetX, targetY) {
+            var dx = targetX - node.x;
+            var dy = targetY - node.y;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var nx = dx / len;
+            var ny = dy / len;
+            var pad = 5;
+
+            if (node.shape === 'rect') {
+                var hw = ((node._drawW || node.radius * 2.6)) / 2 + pad;
+                var hh = ((node._drawH || node.radius * 1.3)) / 2 + pad;
+                var tx = Math.abs(nx) > 0.001 ? hw / Math.abs(nx) : 99999;
+                var ty = Math.abs(ny) > 0.001 ? hh / Math.abs(ny) : 99999;
+                var t = Math.min(tx, ty);
+                return { x: node.x + nx * t, y: node.y + ny * t };
+            }
+            if (node.shape === 'diamond') {
+                var s = node.radius * 0.85 + pad;
+                var absDx = Math.abs(nx);
+                var absDy = Math.abs(ny);
+                var t = s / (absDx + absDy || 1);
+                return { x: node.x + nx * t, y: node.y + ny * t };
+            }
+            if (node.shape === 'cylinder') {
+                var hw = (node.radius * 2.6) / 2 + pad;
+                var hh = (node.radius * 1.5) / 2 + 8 + pad;
+                var tx = Math.abs(nx) > 0.001 ? hw / Math.abs(nx) : 99999;
+                var ty = Math.abs(ny) > 0.001 ? hh / Math.abs(ny) : 99999;
+                var t = Math.min(tx, ty);
+                return { x: node.x + nx * t, y: node.y + ny * t };
+            }
+            if (node.shape === 'pill') {
+                var hw = ((node._drawW || 50)) / 2 + pad;
+                var hh = ((node._drawH || 18)) / 2 + pad;
+                var tx = Math.abs(nx) > 0.001 ? hw / Math.abs(nx) : 99999;
+                var ty = Math.abs(ny) > 0.001 ? hh / Math.abs(ny) : 99999;
+                var t = Math.min(tx, ty);
+                return { x: node.x + nx * t, y: node.y + ny * t };
+            }
+            if (node.shape === 'hexagon') {
+                var angle = Math.atan2(ny, nx);
+                var sector = Math.round(angle / (Math.PI / 3));
+                var sectorAngle = sector * Math.PI / 3;
+                var cosD = Math.cos(angle - sectorAngle);
+                var dist = cosD > 0.001 ? (node.radius + pad) / cosD : node.radius + pad;
+                dist = Math.min(dist, node.radius + pad + 4);
+                return { x: node.x + nx * dist, y: node.y + ny * dist };
+            }
+            return { x: node.x + nx * (node.radius + pad), y: node.y + ny * (node.radius + pad) };
+        }
+
+        function isNodeInEdge(nodeId, edge) {
+            return edge.from === nodeId || edge.to === nodeId;
+        }
+
+        function getConnectedNodeIds(nodeId) {
+            var ids = {};
+            FLOW_EDGES.concat(PROTO_EDGES).forEach(function(e) {
+                if (e.from === nodeId) ids[e.to] = true;
+                if (e.to === nodeId) ids[e.from] = true;
+            });
+            return ids;
+        }
+
+        function drawFlowEdge(e) {
+            var from = allNodes[e.from];
+            var to = allNodes[e.to];
+            if (!from || !to) return;
+
+            var startPt = getNodeBoundary(from, to.x, to.y);
+            var endPt = getNodeBoundary(to, from.x, from.y);
+
+            var isHighlight = hoverNode && (hoverNode.id === e.from || hoverNode.id === e.to);
+            var alpha;
+            if (e.type === 'flow') {
+                alpha = isHighlight ? 0.3 : 0.08;
+            } else {
+                alpha = isHighlight ? 0.6 : (e.type === 'hard' ? 0.35 : 0.2);
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(startPt.x, startPt.y);
+            ctx.lineTo(endPt.x, endPt.y);
+            ctx.strokeStyle = 'rgba(255, 255, 255, ' + alpha + ')';
+            if (e.type === 'soft') {
+                ctx.setLineDash([4, 6]);
+                ctx.lineWidth = 1;
+            } else if (e.type === 'flow') {
+                ctx.setLineDash([3, 5]);
+                ctx.lineWidth = 0.8;
+            } else {
+                ctx.setLineDash([]);
+                ctx.lineWidth = 1.5;
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            if (e.label && isHighlight) {
+                var t = e.labelT || 0.5;
+                var lx = from.x + (to.x - from.x) * t;
+                var ly = from.y + (to.y - from.y) * t;
+                ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+                ctx.fillText(e.label, lx, ly - 8);
+            }
+        }
+
+        function drawSourceNode(n) {
+            var isHover = hoverNode && hoverNode.id === n.id;
+            var connected = hoverNode ? getConnectedNodeIds(hoverNode.id) : {};
+            var isConnected = hoverNode && connected[n.id];
+            var dimmed = hoverNode && !isHover && !isConnected;
+
+            ctx.font = (isHover ? 'bold ' : '') + '13px -apple-system, BlinkMacSystemFont, sans-serif';
+            var tw = ctx.measureText(n.label).width;
+            var w = Math.max(n.radius * 2.6, tw + 24);
+            var h = n.radius * 1.3;
+            n._drawW = w;
+            n._drawH = h;
+            var r = 5;
+
+            ctx.beginPath();
+            ctx.moveTo(n.x - w/2 + r, n.y - h/2);
+            ctx.lineTo(n.x + w/2 - r, n.y - h/2);
+            ctx.quadraticCurveTo(n.x + w/2, n.y - h/2, n.x + w/2, n.y - h/2 + r);
+            ctx.lineTo(n.x + w/2, n.y + h/2 - r);
+            ctx.quadraticCurveTo(n.x + w/2, n.y + h/2, n.x + w/2 - r, n.y + h/2);
+            ctx.lineTo(n.x - w/2 + r, n.y + h/2);
+            ctx.quadraticCurveTo(n.x - w/2, n.y + h/2, n.x - w/2, n.y + h/2 - r);
+            ctx.lineTo(n.x - w/2, n.y - h/2 + r);
+            ctx.quadraticCurveTo(n.x - w/2, n.y - h/2, n.x - w/2 + r, n.y - h/2);
+            ctx.closePath();
+
+            ctx.fillStyle = hexToRgba(n.color, dimmed ? 0.04 : (isHover ? 0.18 : 0.08));
+            ctx.fill();
+            ctx.strokeStyle = hexToRgba(n.color, dimmed ? 0.12 : (isHover ? 0.7 : 0.3));
+            ctx.lineWidth = isHover ? 1.5 : 0.8;
+            ctx.stroke();
+
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.15)' : (isHover ? '#fff' : 'rgba(255,255,255,0.85)');
+            ctx.fillText(n.label, n.x, n.y - (isHover ? 6 : 0));
+
+            if (n.resolverTags && !dimmed) {
+                var tags = n.resolverTags;
+                var tagW = w - 12;
+                var startX = n.x - tagW / 2;
+                var tagY = n.y + 6;
+                var dotR = 3.5;
+                var spacing = tagW / tags.length;
+                ctx.font = '8px -apple-system, BlinkMacSystemFont, sans-serif';
+                ctx.textBaseline = 'middle';
+                tags.forEach(function(tag, i) {
+                    var tx = startX + spacing * i + spacing / 2;
+                    ctx.beginPath();
+                    ctx.arc(tx - 8, tagY, dotR, 0, Math.PI * 2);
+                    ctx.fillStyle = hexToRgba(tag.color, isHover ? 0.9 : 0.6);
+                    ctx.fill();
+                    ctx.textAlign = 'left';
+                    ctx.fillStyle = isHover ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.4)';
+                    ctx.fillText(tag.abbr, tx - 3, tagY);
+                });
+            } else if (isHover && n.sub) {
+                var lines = n.sub.split('\n');
+                ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                lines.forEach(function(line, i) {
+                    ctx.fillText(line, n.x, n.y + 8 + i * 11);
+                });
+            }
+        }
+
+        function drawActionNode(n) {
+            var isHover = hoverNode && hoverNode.id === n.id;
+            var connected = hoverNode ? getConnectedNodeIds(hoverNode.id) : {};
+            var isConnected = hoverNode && connected[n.id];
+            var dimmed = hoverNode && !isHover && !isConnected;
+
+            ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+            var tw = ctx.measureText(n.label).width;
+            var pw = tw + 16;
+            var ph = 18;
+            var pr = ph / 2;
+            n._drawW = pw;
+            n._drawH = ph;
+
+            ctx.beginPath();
+            ctx.moveTo(n.x - pw/2 + pr, n.y - ph/2);
+            ctx.lineTo(n.x + pw/2 - pr, n.y - ph/2);
+            ctx.arc(n.x + pw/2 - pr, n.y, pr, -Math.PI/2, Math.PI/2);
+            ctx.lineTo(n.x - pw/2 + pr, n.y + ph/2);
+            ctx.arc(n.x - pw/2 + pr, n.y, pr, Math.PI/2, -Math.PI/2);
+            ctx.closePath();
+
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.02)' : (isHover ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)');
+            ctx.fill();
+            ctx.strokeStyle = dimmed ? 'rgba(255,255,255,0.06)' : (isHover ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)');
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.1)' : (isHover ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)');
+            ctx.fillText(n.label, n.x, n.y);
+        }
+
+        function drawEngineNode(n) {
+            var isHover = hoverNode && hoverNode.id === n.id;
+            var dimmed = hoverNode && !isHover;
+
+            var pulseR = n.radius + Math.sin(time * 1.5) * 3;
+
+            var glow = ctx.createRadialGradient(n.x, n.y, pulseR * 0.2, n.x, n.y, pulseR * 2.5);
+            glow.addColorStop(0, hexToRgba(n.color, dimmed ? 0.03 : (isHover ? 0.15 : 0.08)));
+            glow.addColorStop(1, hexToRgba(n.color, 0));
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, pulseR * 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = glow;
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, pulseR, 0, Math.PI * 2);
+            ctx.fillStyle = hexToRgba(n.color, dimmed ? 0.05 : (isHover ? 0.2 : 0.1));
+            ctx.fill();
+            ctx.strokeStyle = hexToRgba(n.color, dimmed ? 0.15 : (isHover ? 0.8 : 0.4));
+            ctx.lineWidth = isHover ? 2 : 1.2;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, pulseR * 0.55, 0, Math.PI * 2);
+            ctx.strokeStyle = hexToRgba(n.color, dimmed ? 0.06 : 0.15);
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.2)' : (isHover ? '#fff' : 'rgba(255,255,255,0.9)');
+            ctx.fillText(n.label, n.x, n.y - 8);
+
+            ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)';
+            ctx.fillText(n.sub, n.x, n.y + 12);
+        }
+
+        function drawConfidenceNode(n) {
+            var isHover = hoverNode && hoverNode.id === n.id;
+            var connected = hoverNode ? getConnectedNodeIds(hoverNode.id) : {};
+            var isConnected = hoverNode && connected[n.id];
+            var dimmed = hoverNode && !isHover && !isConnected;
+
+            var r = n.radius;
+            ctx.save();
+            ctx.translate(n.x, n.y);
+            ctx.rotate(Math.PI / 4);
+            ctx.beginPath();
+            var s = r * 0.85;
+            ctx.rect(-s, -s, s * 2, s * 2);
+            ctx.fillStyle = hexToRgba(n.color, dimmed ? 0.04 : (isHover ? 0.18 : 0.08));
+            ctx.fill();
+            ctx.strokeStyle = hexToRgba(n.color, dimmed ? 0.12 : (isHover ? 0.7 : 0.35));
+            ctx.lineWidth = isHover ? 1.5 : 0.8;
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.font = (isHover ? 'bold ' : '') + '14px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.15)' : (isHover ? '#fff' : 'rgba(255,255,255,0.85)');
+
+            var subLines = n.sub ? n.sub.split('\n') : [];
+            var totalLines = subLines.length;
+            var labelY = n.y - (totalLines > 1 ? 10 : 6);
+            ctx.fillText(n.label, n.x, labelY);
+
+            ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.1)' : (isHover ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.45)');
+            subLines.forEach(function(line, i) {
+                ctx.fillText(line, n.x, labelY + 14 + i * 12);
+            });
+        }
+
+        function drawProtocolNode(p) {
+            var isHover = hoverNode && hoverNode.id === p.id;
+            var connected = hoverNode ? getConnectedNodeIds(hoverNode.id) : {};
+            var isConnected = hoverNode && connected[p.id];
+            var dimmed = hoverNode && !isHover && !isConnected;
+
+            var r = p.radius;
+
+            var glow = ctx.createRadialGradient(p.x, p.y, r * 0.3, p.x, p.y, r * 2);
+            glow.addColorStop(0, hexToRgba(p.color, dimmed ? 0.03 : (isHover ? 0.2 : 0.1)));
+            glow.addColorStop(1, hexToRgba(p.color, 0));
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r * 2, 0, Math.PI * 2);
+            ctx.fillStyle = glow;
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fillStyle = hexToRgba(p.color, dimmed ? 0.05 : (isHover ? 0.22 : 0.1));
+            ctx.fill();
+            ctx.strokeStyle = hexToRgba(p.color, dimmed ? 0.12 : (isHover ? 0.85 : 0.45));
+            ctx.lineWidth = isHover ? 2 : 1;
+            ctx.stroke();
+
+            var fontSize = p.label.length > 6 ? 13 : (p.label.length > 4 ? 14 : 16);
+            ctx.font = (isHover ? 'bold ' : '') + fontSize + 'px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.15)' : (isHover ? '#fff' : 'rgba(255,255,255,0.9)');
+            ctx.fillText(p.label, p.x, p.y - 6);
+
+            ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.08)' : (isHover ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.35)');
+            ctx.fillText(p.rfc === 'draft' ? 'Draft' : p.rfc, p.x, p.y + 11);
+        }
+
+        function drawStorageNode(n) {
+            var isHover = hoverNode && hoverNode.id === n.id;
+            var connected = hoverNode ? getConnectedNodeIds(hoverNode.id) : {};
+            var isConnected = hoverNode && connected[n.id];
+            var dimmed = hoverNode && !isHover && !isConnected;
+
+            var w = n.radius * 2.6;
+            var h = n.radius * 1.5;
+            var ew = w / 2;
+            var eh = 8;
+
+            ctx.beginPath();
+            ctx.ellipse(n.x, n.y - h/2, ew, eh, 0, Math.PI, Math.PI * 2);
+            ctx.lineTo(n.x + ew, n.y + h/2);
+            ctx.ellipse(n.x, n.y + h/2, ew, eh, 0, 0, Math.PI);
+            ctx.lineTo(n.x - ew, n.y - h/2);
+            ctx.fillStyle = hexToRgba(n.color, dimmed ? 0.04 : (isHover ? 0.18 : 0.08));
+            ctx.fill();
+            ctx.strokeStyle = hexToRgba(n.color, dimmed ? 0.12 : (isHover ? 0.7 : 0.3));
+            ctx.lineWidth = isHover ? 1.5 : 0.8;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.ellipse(n.x, n.y - h/2, ew, eh, 0, 0, Math.PI * 2);
+            ctx.strokeStyle = hexToRgba(n.color, dimmed ? 0.08 : (isHover ? 0.5 : 0.2));
+            ctx.lineWidth = 0.6;
+            ctx.stroke();
+
+            var fontSize = n.label.length > 8 ? 12 : 13;
+            ctx.font = (isHover ? 'bold ' : '') + fontSize + 'px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.15)' : (isHover ? '#fff' : 'rgba(255,255,255,0.75)');
+            ctx.fillText(n.label, n.x, n.y + 2);
+
+            if (isHover && n.sub) {
+                var lines = n.sub.split('\n');
+                ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                lines.forEach(function(line, i) {
+                    ctx.fillText(line, n.x, n.y + h/2 + 14 + i * 11);
+                });
+            }
+        }
+
+        function drawOutputNode(n) {
+            var isHover = hoverNode && hoverNode.id === n.id;
+            var connected = hoverNode ? getConnectedNodeIds(hoverNode.id) : {};
+            var isConnected = hoverNode && connected[n.id];
+            var dimmed = hoverNode && !isHover && !isConnected;
+
+            var r = n.radius;
+            ctx.beginPath();
+            for (var i = 0; i < 6; i++) {
+                var angle = Math.PI / 6 + i * Math.PI / 3;
+                var hx = n.x + r * Math.cos(angle);
+                var hy = n.y + r * Math.sin(angle);
+                if (i === 0) ctx.moveTo(hx, hy);
+                else ctx.lineTo(hx, hy);
+            }
+            ctx.closePath();
+            ctx.fillStyle = hexToRgba(n.color, dimmed ? 0.04 : (isHover ? 0.18 : 0.08));
+            ctx.fill();
+            ctx.strokeStyle = hexToRgba(n.color, dimmed ? 0.12 : (isHover ? 0.7 : 0.3));
+            ctx.lineWidth = isHover ? 1.5 : 0.8;
+            ctx.stroke();
+
+            var fontSize = n.label.length > 10 ? 11 : (n.label.length > 7 ? 12 : 14);
+            ctx.font = (isHover ? 'bold ' : '') + fontSize + 'px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = dimmed ? 'rgba(255,255,255,0.15)' : (isHover ? '#fff' : 'rgba(255,255,255,0.75)');
+            ctx.fillText(n.label, n.x, n.y);
+
+            if (isHover && n.sub) {
+                var lines = n.sub.split('\n');
+                ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                lines.forEach(function(line, i) {
+                    ctx.fillText(line, n.x, n.y + r + 10 + i * 11);
+                });
+            }
+        }
+
+        function drawAmbient() {
+            ambientParticles.forEach(function(ap) {
+                ctx.beginPath();
+                ctx.arc(ap.x, ap.y, ap.size, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, ' + ap.alpha + ')';
+                ctx.fill();
+            });
+        }
+
+        function drawFlowParticles() {
+            flowParticles.forEach(function(fp) {
+                var from = allNodes[fp.edge.from];
+                var to = allNodes[fp.edge.to];
+                if (!from || !to) return;
+                var startPt = getNodeBoundary(from, to.x, to.y);
+                var endPt = getNodeBoundary(to, from.x, from.y);
+                var x = startPt.x + (endPt.x - startPt.x) * fp.t;
+                var y = startPt.y + (endPt.y - startPt.y) * fp.t;
+                var isHighlight = hoverNode && (hoverNode.id === fp.edge.from || hoverNode.id === fp.edge.to);
+                var alpha = isHighlight ? fp.alpha * 1.8 : fp.alpha * 0.6;
+                var color = from.color || COLORS.engine;
+                ctx.beginPath();
+                ctx.arc(x, y, fp.size * (isHighlight ? 1.3 : 1), 0, Math.PI * 2);
+                ctx.fillStyle = hexToRgba(color, alpha);
+                ctx.fill();
+            });
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+
+            drawAmbient();
+
+            FLOW_EDGES.forEach(function(e) { drawFlowEdge(e); });
+            PROTO_EDGES.forEach(function(e) { drawFlowEdge(e); });
+
+            drawFlowParticles();
+
+            SOURCES.forEach(function(s) { drawSourceNode(s); });
+            STORAGE.forEach(function(s) { drawStorageNode(s); });
+            ACTIONS.forEach(function(a) { drawActionNode(a); });
+            CONFIDENCE.forEach(function(c) { drawConfidenceNode(c); });
+            OUTPUTS.forEach(function(o) { drawOutputNode(o); });
+            PROTOCOLS.forEach(function(p) { drawProtocolNode(p); });
+            drawEngineNode(ENGINE);
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        resize();
+        initAmbient();
+        initFlowParticles();
+        window.addEventListener('resize', function() {
+            resize();
+            initAmbient();
+        });
+        loop();
+    })();
+    </script>
+</body>
+</html>

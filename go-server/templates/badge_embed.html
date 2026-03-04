@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    {{template "head" .}}
+    <title>Security Badge - DNS Tool</title>
+    <meta name="description" content="Embed a DNS security posture badge for your domain. Show your security score on your website, README, or profile.">
+    <link rel="canonical" href="https://dnstool.it-help.tech/badge/embed">
+    <meta property="og:url" content="https://dnstool.it-help.tech/badge/embed">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Security Badge - DNS Tool">
+    <meta property="og:description" content="Embed a DNS security posture badge for your domain. Show your security score on your website, README, or profile.">
+    <meta property="og:image" content="https://dnstool.it-help.tech/static/images/og-image.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Security Badge - DNS Tool">
+    <meta name="twitter:description" content="Embed a DNS security posture badge for your domain.">
+    <meta name="twitter:image" content="https://dnstool.it-help.tech/static/images/og-image.png">
+    {{template "critical_css" .}}
+    {{template "head_css" .}}
+</head>
+<body>
+    {{template "nav" .}}
+
+    <main id="main-content" class="container my-4">
+        {{template "flash_messages" .}}
+
+        <h1 class="h3 mb-1">Security Badge</h1>
+        <p class="text-muted mb-4">Scan your domain, then embed the badge anywhere &mdash; GitHub README, blog, personal site, Hacker News profile.</p>
+
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-search me-2"></i>Generate Badge</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="badgeDomain" class="form-label small fw-semibold">Domain</label>
+                            <input type="text" class="form-control" id="badgeDomain" placeholder="example.com" autocomplete="off" autocapitalize="none" spellcheck="false">
+                        </div>
+                        <div class="mb-3">
+                            <span class="form-label small fw-semibold d-block">Style</span>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary active" id="btnStyleFlat" data-style="flat">Standard</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" id="btnStyleCovert" data-style="covert">Covert</button>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="btnGenerateBadge">
+                            <i class="fas fa-terminal me-1"></i>Generate
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card mb-4 d-none" id="badgePreviewCard">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-eye me-2"></i>Preview</h5>
+                    </div>
+                    <div class="card-body text-center py-4" id="badgePreview">
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6">
+                <div class="card mb-4 d-none" id="badgeEmbedCard">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-code me-2"></i>Embed Code</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="embedHTML" class="form-label small fw-semibold font-monospace">HTML</label>
+                            <div class="input-group">
+                                <textarea class="form-control font-monospace small" id="embedHTML" rows="3" readonly></textarea>
+                                <button type="button" class="btn btn-outline-secondary" id="copyHTML" title="Copy HTML"><i class="fas fa-copy"></i></button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="embedMarkdown" class="form-label small fw-semibold font-monospace">Markdown</label>
+                            <div class="input-group">
+                                <textarea class="form-control font-monospace small" id="embedMarkdown" rows="2" readonly></textarea>
+                                <button type="button" class="btn btn-outline-secondary" id="copyMarkdown" title="Copy Markdown"><i class="fas fa-copy"></i></button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="embedURL" class="form-label small fw-semibold font-monospace">Image URL</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace small" id="embedURL" readonly>
+                                <button type="button" class="btn btn-outline-secondary" id="copyURL" title="Copy URL"><i class="fas fa-copy"></i></button>
+                            </div>
+                        </div>
+                        <div class="mb-0">
+                            <label for="embedCurl" class="form-label small fw-semibold font-monospace">curl</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace small" id="embedCurl" readonly>
+                                <button type="button" class="btn btn-outline-secondary" id="copyCurl" title="Copy curl"><i class="fas fa-copy"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-shield-halved me-2"></i>GitHub &amp; Shields.io</h5>
+                    </div>
+                    <div class="card-body small">
+                        <p class="text-muted">Use the <strong>Shields.io endpoint</strong> for dynamic badges in your GitHub README, CI dashboards, or documentation.</p>
+                        <div class="mb-3">
+                            <label for="embedShieldsURL" class="form-label small fw-semibold font-monospace">Shields.io Endpoint URL</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace small" id="embedShieldsURL" readonly placeholder="Generate a badge first">
+                                <button type="button" class="btn btn-outline-secondary" id="copyShieldsURL" title="Copy Shields.io URL"><i class="fas fa-copy"></i></button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="embedShieldsMarkdown" class="form-label small fw-semibold font-monospace">Shields.io Markdown</label>
+                            <div class="input-group">
+                                <textarea class="form-control font-monospace small" id="embedShieldsMarkdown" rows="2" readonly placeholder="Generate a badge first"></textarea>
+                                <button type="button" class="btn btn-outline-secondary" id="copyShieldsMarkdown" title="Copy Shields.io Markdown"><i class="fas fa-copy"></i></button>
+                            </div>
+                        </div>
+                        <p class="text-muted mb-0"><i class="fas fa-lock me-1"></i>Private scans are excluded. Only public domain posture data is exposed. Badge data cached for 1 hour.</p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>How It Works</h5>
+                    </div>
+                    <div class="card-body small text-muted">
+                        <p>The badge reflects the most recent public scan of your domain. It shows the risk level from the DNS Security &amp; Trust Posture analysis.</p>
+                        <p>Badge data is cached for 1 hour. Private scans are not shown.</p>
+                        <p class="mb-0"><strong>Requirement:</strong> Your domain must have been scanned at least once on DNS Tool. <a href="/analyze">Run a scan</a> first if needed.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{template "footer" .}}
+    </main>
+
+    {{template "scripts" .}}
+    <script nonce="{{.CspNonce}}">
+    function onCopyFieldSuccess(btnId) {
+        const btn = document.getElementById(btnId);
+        const icon = btn.querySelector('i');
+        icon.className = 'fas fa-check';
+        setTimeout(function() { icon.className = 'fas fa-copy'; }, 1500);
+    }
+
+    function handleCopyFieldClick(btnId, fieldId) {
+        const el = document.getElementById(fieldId);
+        navigator.clipboard.writeText(el.value).then(function() {
+            onCopyFieldSuccess(btnId);
+        });
+    }
+
+    function copyField(btnId, fieldId) {
+        document.getElementById(btnId).addEventListener('click', function() {
+            handleCopyFieldClick(btnId, fieldId);
+        });
+    }
+
+    (function() {
+        const baseURL = '{{.BaseURL}}';
+        const domain = document.getElementById('badgeDomain');
+        let style = 'flat';
+        const previewCard = document.getElementById('badgePreviewCard');
+        const embedCard = document.getElementById('badgeEmbedCard');
+        const preview = document.getElementById('badgePreview');
+
+        document.getElementById('btnStyleFlat').addEventListener('click', function() {
+            style = 'flat';
+            this.classList.add('active');
+            document.getElementById('btnStyleCovert').classList.remove('active');
+        });
+        document.getElementById('btnStyleCovert').addEventListener('click', function() {
+            style = 'covert';
+            this.classList.add('active');
+            document.getElementById('btnStyleFlat').classList.remove('active');
+        });
+
+        document.getElementById('btnGenerateBadge').addEventListener('click', function() {
+            const d = domain.value.trim();
+            if (!d) return;
+
+            const badgeURL = baseURL + '/badge?domain=' + encodeURIComponent(d) + (style === 'flat' ? '' : '&style=' + style);
+            const reportURL = baseURL + '/analyze?domain=' + encodeURIComponent(d);
+
+            preview.innerHTML = '<a href="' + reportURL + '"><img src="' + badgeURL + '" alt="DNS Tool Security Badge for ' + d + '"></a>';
+            previewCard.classList.remove('d-none');
+            embedCard.classList.remove('d-none');
+
+            document.getElementById('embedHTML').value = '<a href="' + reportURL + '"><img src="' + badgeURL + '" alt="DNS Security: ' + d + '"></a>';
+            document.getElementById('embedMarkdown').value = '[![DNS Security: ' + d + '](' + badgeURL + ')](' + reportURL + ')';
+            document.getElementById('embedURL').value = badgeURL;
+            document.getElementById('embedCurl').value = "curl -s '" + badgeURL + "' > dns-badge.svg";
+
+            const shieldsEndpoint = baseURL + '/badge/shields?domain=' + encodeURIComponent(d);
+            const shieldsURL = 'https://img.shields.io/endpoint?url=' + encodeURIComponent(shieldsEndpoint);
+            document.getElementById('embedShieldsURL').value = shieldsURL;
+            document.getElementById('embedShieldsMarkdown').value = '[![DNS Tool Security](' + shieldsURL + ')](' + reportURL + ')';
+        });
+
+        copyField('copyHTML', 'embedHTML');
+        copyField('copyMarkdown', 'embedMarkdown');
+        copyField('copyURL', 'embedURL');
+        copyField('copyCurl', 'embedCurl');
+        copyField('copyShieldsURL', 'embedShieldsURL');
+        copyField('copyShieldsMarkdown', 'embedShieldsMarkdown');
+
+        domain.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') document.getElementById('btnGenerateBadge').click();
+        });
+
+        const params = new URLSearchParams(globalThis.location.search);
+        if (params.get('domain')) {
+            domain.value = params.get('domain');
+            document.getElementById('btnGenerateBadge').click();
+        }
+    })();
+    </script>
+</body>
+</html>

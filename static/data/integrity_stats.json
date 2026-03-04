@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "last_updated": "2026-03-03",
+  "taxonomy": {
+    "scoring_calibration": "Confidence weighting or scoring logic required adjustment",
+    "evidence_reinterpretation": "Evidence was weighted or classified incorrectly",
+    "drift_detection": "Change detection model missed or misidentified a transition",
+    "resolver_trust": "Upstream resolver behavior produced misleading results",
+    "false_positive": "A finding was asserted that did not reflect reality",
+    "confidence_decay": "Temporal decay model required recalibration"
+  },
+  "summary": {
+    "total_events": 3,
+    "open": 0,
+    "closed": 3,
+    "last_event_date": "2026-03-01",
+    "confidence_recalibrations": 2,
+    "protocols_affected": ["DMARC", "DANE", "Drift"]
+  },
+  "events": [
+    {
+      "id": "EDE-001",
+      "date": "2026-02-14",
+      "commit": "084c6268c0382bd4fec9cebaf4b8e0ffbcd4cd6b",
+      "category": "scoring_calibration",
+      "severity": "moderate",
+      "title": "DMARC confidence weighting adjusted for aggregate-only policies",
+      "status": "closed",
+      "protocols_affected": ["DMARC"],
+      "confidence_impact": "ICIE weight recalibration: p=none+rua now scores higher than p=none without reporting. Prior model treated both identically, understating domains with partial monitoring.",
+      "resolution": "Recalibrated ICIE weights to distinguish p=none with rua from p=none without reporting. Affected scans retroactively flagged in drift history.",
+      "bayesian_note": "Heuristic confidence adjustment: the scoring model previously assigned equal weight to p=none regardless of reporting configuration. The presence of rua= is now treated as differentiating evidence that increases the confidence level for partial DMARC deployment."
+    },
+    {
+      "id": "EDE-002",
+      "date": "2026-03-01",
+      "commit": "70ae4dd3ce5ace350ac6d192b2576e649a54deff",
+      "category": "false_positive",
+      "severity": "significant",
+      "title": "DANE TLSA records accepted without DNSSEC authentication verification",
+      "status": "closed",
+      "protocols_affected": ["DANE"],
+      "confidence_impact": "Verdict logic accepted TLSA records without verifying the DNSSEC AD flag. Confidence was asserted at levels the evidence did not support — DANE requires DNSSEC validation per RFC 6698 §1.",
+      "resolution": "TLSA verification now checks DNSSEC AD flag via QueryDNSWithTTL. Records found without authenticated DNSSEC are flagged rather than silently accepted. Confidence engine marks result as low-certainty when authentication status is absent.",
+      "bayesian_note": "Confidence adjustment: TLSA presence was incorrectly treated as sufficient evidence of DANE deployment (near-certainty). Corrected to require DNSSEC authentication status, reflecting that unauthenticated TLSA records provide no security guarantee per RFC 6698."
+    },
+    {
+      "id": "EDE-003",
+      "date": "2026-02-21",
+      "commit": "3ad0056f3020e724b1192168aaed2c5e764eb345",
+      "category": "drift_detection",
+      "severity": "moderate",
+      "title": "Posture hash algorithm upgraded from SHA-256 to SHA-3-512",
+      "status": "closed",
+      "protocols_affected": ["Drift"],
+      "confidence_impact": "Hash algorithm change required regeneration of all historical drift baselines. Legacy SHA-256 hashes retained as fallback for transition period.",
+      "resolution": "Posture hash upgraded to SHA-3-512 with CanonicalPostureHashLegacySHA256 fallback. All historical drift baselines regenerated with new algorithm. CNAME normalization expanded in subsequent commit (2026-02-23).",
+      "bayesian_note": "Detection model upgraded from SHA-256 to SHA-3-512 for stronger collision resistance. Record normalization expanded to include MX, TXT, SOA, and CAA canonical forms, eliminating a class of false negatives in change detection for CNAME-dependent records."
+    }
+  ]
+}
