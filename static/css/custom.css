@@ -4279,7 +4279,7 @@ body.covert-mode .proto-dkim.bg-info {
 
     .print-header-accent {
         height: 5pt;
-        background: linear-gradient(90deg, #1e3a5f 0%, #0e7490 60%, #d97706 100%) !important;
+        background: linear-gradient(90deg, #1e3a5f 0%, #0e7490 45%, #C8A878 80%, #d97706 100%) !important;
         border-radius: 2pt;
         margin-bottom: 14pt;
     }
@@ -4309,14 +4309,14 @@ body.covert-mode .proto-dkim.bg-info {
     }
 
     .print-brand-logo {
-        width: 24pt;
-        height: 24pt;
+        width: 36pt;
+        height: 36pt;
         border-radius: 50%;
-        margin-right: 7pt;
+        margin-right: 9pt;
     }
 
     .print-brand-name {
-        font-size: 8.5pt;
+        font-size: 11pt;
         font-weight: 700;
         color: #1e3a5f;
         letter-spacing: 0.08em;
@@ -4324,12 +4324,12 @@ body.covert-mode .proto-dkim.bg-info {
     }
 
     .print-report-title {
-        font-size: 15pt;
+        font-size: 16pt;
         font-weight: 800;
         color: #1a1a2e;
         letter-spacing: -0.2pt;
         line-height: 1.2;
-        margin-top: 2pt;
+        margin-top: 4pt;
     }
 
     .print-report-meta {
@@ -4426,7 +4426,7 @@ body.covert-mode .proto-dkim.bg-info {
 
     .print-footer-accent {
         height: 3pt;
-        background: linear-gradient(90deg, #1e3a5f 0%, #0e7490 60%, #d97706 100%) !important;
+        background: linear-gradient(90deg, #1e3a5f 0%, #0e7490 45%, #C8A878 80%, #d97706 100%) !important;
         border-radius: 1pt;
         margin-bottom: 8pt;
     }

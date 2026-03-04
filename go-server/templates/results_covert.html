@@ -118,7 +118,33 @@
         {{$ns_fleet := mapGetMap "ns_fleet" $results}}
         {{$dnssec_ops := mapGetMap "dnssec_ops" $results}}
 
-        <div class="results-header mb-4">
+        <div class="print-report-header">
+            <div class="print-header-accent"></div>
+            <div class="print-header-toprow">
+                <div class="print-header-left">
+                    <div class="print-report-brand">
+                        <img src="/static/images/owl-emblem-circle.png" alt="DNS Tool" class="print-brand-logo">
+                        <span class="print-brand-name">DNS Tool</span>
+                    </div>
+                    <div class="print-report-title">Recon Report</div>
+                </div>
+                <div class="print-header-right">
+                    <div class="print-report-meta">
+                        {{if .AnalysisTimestamp}}<span class="print-meta-label">Generated</span> {{.AnalysisTimestamp}}{{end}}
+                        {{if gt .AnalysisDuration 0}}<br><span class="print-meta-label">Duration</span> {{formatFloat 1 .AnalysisDuration}}s{{end}}
+                        {{if .ToolVersion}}<br><span class="print-meta-label">Version</span> v{{.ToolVersion}}{{end}}
+                    </div>
+                    <div class="print-tlp-badge">TLP:AMBER</div>
+                    <div class="print-tlp-note">Limited disclosure — recipients may share within their organization only</div>
+                </div>
+            </div>
+            <div class="print-domain-banner">
+                <div class="print-domain-label">Subject Domain</div>
+                <div class="print-domain-name">{{.Domain}}</div>
+            </div>
+        </div>
+
+        <div class="results-header mb-4 screen-only">
             <div class="results-header-info">
                 <h1 class="h3 mb-1"><i class="fas fa-crosshairs me-2"></i>Recon Report</h1>
                 <div class="domain-display">
@@ -1624,6 +1650,27 @@
         });
     })();
     </script>
+
+    <footer class="print-report-footer" aria-label="Print report footer">
+        <div class="print-footer-accent"></div>
+        <div class="print-footer-content">
+            <div class="print-footer-left">
+                <strong>DNS Tool</strong>
+                <span>dnstool.it-help.tech</span>
+            </div>
+            <div class="print-footer-center">
+                <span class="print-footer-tagline">We answer the BIG questions.</span>
+                <span class="print-footer-note">Report reflects evaluated DNS security posture at time of generation.</span>
+            </div>
+            <div class="print-footer-right">
+                <strong>619-853-5008</strong>
+                <span>San Diego, CA</span>
+            </div>
+        </div>
+        <div class="print-footer-disclaimer">
+            <strong>TLP:AMBER</strong> — This report contains security posture information that may reveal actionable vulnerabilities. Recipients may share within their organization and with clients/customers who need the information to protect themselves, but not via publicly accessible channels. DNS records are public data queried via open-standard protocols; analysis methodology, posture scoring, and remediation guidance &copy; DNS Tool. All conclusions independently verifiable.
+        </div>
+    </footer>
 
     {{template "footer" .}}
 </body>
