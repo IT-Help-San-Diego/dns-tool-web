@@ -47,6 +47,7 @@ const (
         mapKeySmtpTransport         = "smtp_transport"
         mapKeySubdomains            = "subdomains"
         mapKeyTlsrpt                = "tlsrpt"
+        mapKeyWeb3                  = "web3_analysis"
         strNotChecked               = "Not checked"
         statusInfoOrch              = "info"
         mapKeyTaskOrch              = "task"
@@ -80,13 +81,77 @@ func (a *Analyzer) AnalyzeDomain(ctx context.Context, domain string, customDKIMS
         if len(opts) > 0 {
                 options = opts[0]
         }
+        if rejected := a.acquireSlot(domain); rejected != nil {
+                return rejected
+        }
+        defer func() { <-a.semaphore }()
+
+        ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+        defer cancel()
+
+        originalInput := domain
+        inputKind := ClassifyInput(domain)
+        web3Resolution, resolved, earlyReturn := a.resolveWeb3Input(ctx, domain, inputKind)
+        if earlyReturn != nil {
+                return earlyReturn
+        }
+        if resolved != "" {
+                domain = resolved
+        }
+
+        domainStatus, domainStatusMessage, earlyReturn := a.checkExistence(ctx, domain, originalInput, inputKind, web3Resolution)
+        if earlyReturn != nil {
+                return earlyReturn
+        }
+
+        analysisStart := time.Now()
+        scope := web3Resolution.AnalysisScope
+        if scope == "" {
+                scope = ScopeOwnedDNS
+        }
+        resultsMap, timings := a.runScopedAnalyses(ctx, domain, customDKIMSelectors, analysisStart, options.OnPhaseProgress, scope)
+
+        parallelElapsed := time.Since(analysisStart).Seconds()
+        slog.Info("Parallel lookups completed", mapKeyDomain, domain, "elapsed_s", fmt.Sprintf(fmtSeconds, parallelElapsed), "tasks", len(resultsMap), "scope", scope)
+
+        engineStart := time.Now()
+        if options.OnPhaseProgress != nil {
+                options.OnPhaseProgress("analysis_engine", "running", 0)
+        }
+
+        results, seqTimings := a.assembleResults(ctx, domain, resultsMap, domainStatus, domainStatusMessage, options, analysisStart, scope)
+        timings = append(timings, seqTimings...)
+
+        annotateWeb3Results(results, web3Resolution, originalInput, inputKind)
+
+        provenance := buildAnalysisProvenance(inputKind, scope, web3Resolution, results)
+        results["_analysis_provenance"] = provenance
+        results["_schema_version"] = 2
+
+        totalElapsed := time.Since(analysisStart).Seconds()
+        slog.Info("Analysis complete", mapKeyDomain, domain, "total_s", fmt.Sprintf(fmtSeconds, totalElapsed), "parallel_s", fmt.Sprintf(fmtSeconds, parallelElapsed))
+
+        engineDurMs := int(time.Since(engineStart).Milliseconds())
+        telemetry := NewScanTelemetry(timings, int(time.Since(analysisStart).Milliseconds()))
+        results["_scan_telemetry"] = telemetry
+
+        if options.OnPhaseProgress != nil {
+                options.OnPhaseProgress("analysis_engine", "done", engineDurMs)
+        }
+
+        return results
+}
+
+func (a *Analyzer) acquireSlot(domain string) map[string]any {
         queueStart := time.Now()
         select {
         case a.semaphore <- struct{}{}:
-                defer func() { <-a.semaphore }()
-                if waited := time.Since(queueStart); waited > 500*time.Millisecond {
-                        slog.Info("Analysis queued before slot opened", mapKeyDomain, domain, "waited_ms", waited.Milliseconds())
-                }
+                go func() {
+                        if waited := time.Since(queueStart); waited > 500*time.Millisecond {
+                                slog.Info("Analysis queued before slot opened", mapKeyDomain, domain, "waited_ms", waited.Milliseconds())
+                        }
+                }()
+                return nil
         case <-time.After(30 * time.Second):
                 a.backpressureRejections.Add(1)
                 slog.Warn("Backpressure: rejected analysis after 30s queue", mapKeyDomain, domain)
@@ -96,38 +161,73 @@ func (a *Analyzer) AnalyzeDomain(ctx context.Context, domain string, customDKIMS
                         "analysis_success": false,
                 }
         }
-
-        ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-        defer cancel()
-
-        exists, domainStatus, domainStatusMessage := a.checkDomainExists(ctx, domain)
-        if !exists {
-                return a.buildNonExistentResult(domain, domainStatus, domainStatusMessage)
-        }
-
-        analysisStart := time.Now()
-        resultsMap, timings := a.runParallelAnalyses(ctx, domain, customDKIMSelectors, analysisStart, options.OnPhaseProgress)
-
-        parallelElapsed := time.Since(analysisStart).Seconds()
-        slog.Info("Parallel lookups completed", mapKeyDomain, domain, "elapsed_s", fmt.Sprintf(fmtSeconds, parallelElapsed), "tasks", len(resultsMap))
-
-        results, seqTimings := a.assembleResults(ctx, domain, resultsMap, domainStatus, domainStatusMessage, options, analysisStart)
-        timings = append(timings, seqTimings...)
-
-        totalElapsed := time.Since(analysisStart).Seconds()
-        slog.Info("Analysis complete", mapKeyDomain, domain, "total_s", fmt.Sprintf(fmtSeconds, totalElapsed), "parallel_s", fmt.Sprintf(fmtSeconds, parallelElapsed))
-
-        telemetry := NewScanTelemetry(timings, int(time.Since(analysisStart).Milliseconds()))
-        results["_scan_telemetry"] = telemetry
-
-        if options.OnPhaseProgress != nil {
-                options.OnPhaseProgress("analysis_engine", "done", int(time.Since(analysisStart).Milliseconds()))
-        }
-
-        return results
 }
 
-func (a *Analyzer) assembleResults(ctx context.Context, domain string, resultsMap map[string]any, domainStatus string, domainStatusMessage *string, options AnalysisOptions, analysisStart time.Time) (map[string]any, []PhaseTiming) {
+func (a *Analyzer) resolveWeb3Input(ctx context.Context, domain string, inputKind InputKind) (Web3ResolutionResult, string, map[string]any) {
+        var web3Resolution Web3ResolutionResult
+        if inputKind == InputKindDNSDomain {
+                return web3Resolution, "", nil
+        }
+        web3Resolution = a.ResolveWeb3Domain(ctx, domain)
+        if web3Resolution.ResolvedDomain != "" && web3Resolution.Error == "" {
+                slog.Info("Web3 input resolved", "original", domain, "resolved", web3Resolution.ResolvedDomain,
+                        "type", web3Resolution.ResolutionType, "scope", web3Resolution.AnalysisScope,
+                        "is_gateway", web3Resolution.IsGatewayDomain)
+                return web3Resolution, web3Resolution.ResolvedDomain, nil
+        }
+        if web3Resolution.Error != "" {
+                msg := fmt.Sprintf("Web3 domain resolution failed for %s: %s", domain, web3Resolution.Error)
+                result := a.buildNonExistentResult(domain, "web3_unresolved", &msg)
+                result["web3_resolution"] = web3Resolution.ToMap()
+                result["input_kind"] = string(inputKind)
+                result["_schema_version"] = 2
+                result["_analysis_provenance"] = buildAnalysisProvenance(inputKind, web3Resolution.AnalysisScope, web3Resolution, result)
+                return web3Resolution, "", result
+        }
+        return web3Resolution, "", nil
+}
+
+func (a *Analyzer) checkExistence(ctx context.Context, domain, originalInput string, inputKind InputKind, web3 Web3ResolutionResult) (string, *string, map[string]any) {
+        if web3.IsWeb3Input && web3.ResolutionType == "hns" && web3.Error == "" {
+                msg := "Handshake domain resolved via HNS resolver"
+                return "hns_resolved", &msg, nil
+        }
+        exists, ds, dsm := a.checkDomainExists(ctx, domain)
+        if exists {
+                return ds, dsm, nil
+        }
+        result := a.buildNonExistentResult(domain, ds, dsm)
+        if web3.IsWeb3Input {
+                result["web3_resolution"] = web3.ToMap()
+                result[mapKeyDomain] = originalInput
+                result["input_kind"] = string(inputKind)
+        }
+        result["_schema_version"] = 2
+        result["_analysis_provenance"] = buildAnalysisProvenance(inputKind, ScopeOwnedDNS, web3, result)
+        return ds, dsm, result
+}
+
+func annotateWeb3Results(results map[string]any, web3 Web3ResolutionResult, originalInput string, inputKind InputKind) {
+        if !web3.IsWeb3Input {
+                return
+        }
+        results["web3_resolution"] = web3.ToMap()
+        results["web3_original_input"] = originalInput
+        results["input_kind"] = string(inputKind)
+        if w3a, ok := results[mapKeyWeb3].(map[string]any); ok {
+                w3a["resolution_info"] = web3.ToMap()
+        }
+        if web3.AttributionWarning != "" {
+                results["attribution_warning"] = web3.AttributionWarning
+        }
+}
+
+func (a *Analyzer) assembleResults(ctx context.Context, domain string, resultsMap map[string]any, domainStatus string, domainStatusMessage *string, options AnalysisOptions, analysisStart time.Time, scope ...AnalysisScope) (map[string]any, []PhaseTiming) {
+        analysisScope := ScopeOwnedDNS
+        if len(scope) > 0 && scope[0] != "" {
+                analysisScope = scope[0]
+        }
+        _ = analysisScope
         basic := getMapResult(resultsMap, "basic")
         auth := getMapResult(resultsMap, "auth")
 
@@ -141,18 +241,33 @@ func (a *Analyzer) assembleResults(ctx context.Context, domain string, resultsMa
         postCtx, postCancel := context.WithTimeout(ctx, 15*time.Second)
         defer postCancel()
 
+        progressCb := options.OnPhaseProgress
         var seqTimings []PhaseTiming
 
         daneStart := time.Now()
+        if progressCb != nil {
+                progressCb("dnssec_dane", "running", 0)
+        }
         resultsMap[mapKeyDaneOrch] = a.AnalyzeDANE(postCtx, domain, mxForDANE)
         daneDur := time.Since(daneStart)
-        slog.Info(logTaskCompleted, mapKeyTaskOrch, mapKeyDaneOrch, mapKeyDomain, domain, mapKeyElapsedMs, fmt.Sprintf(fmtElapsedMs, float64(daneDur.Milliseconds())))
-        seqTimings = append(seqTimings, PhaseTiming{PhaseGroup: "dnssec_dane", PhaseTask: "dane", StartedAtMs: int(daneStart.Sub(analysisStart).Milliseconds()), DurationMs: int(daneDur.Milliseconds())})
+        daneDurMs := int(daneDur.Milliseconds())
+        slog.Info(logTaskCompleted, mapKeyTaskOrch, mapKeyDaneOrch, mapKeyDomain, domain, mapKeyElapsedMs, fmt.Sprintf(fmtElapsedMs, float64(daneDurMs)))
+        seqTimings = append(seqTimings, PhaseTiming{PhaseGroup: "dnssec_dane", PhaseTask: "dane", StartedAtMs: int(daneStart.Sub(analysisStart).Milliseconds()), DurationMs: daneDurMs})
+        if progressCb != nil {
+                progressCb("dnssec_dane", "done", daneDurMs)
+        }
 
         smtpStart := time.Now()
+        if progressCb != nil {
+                progressCb("smtp_transport", "running", 0)
+        }
         smtpResult := a.computeSMTPResult(postCtx, domain, isTLD, mxForDANE, resultsMap)
         smtpDur := time.Since(smtpStart)
-        seqTimings = append(seqTimings, PhaseTiming{PhaseGroup: "smtp_transport", PhaseTask: "smtp_transport", StartedAtMs: int(smtpStart.Sub(analysisStart).Milliseconds()), DurationMs: int(smtpDur.Milliseconds())})
+        smtpDurMs := int(smtpDur.Milliseconds())
+        seqTimings = append(seqTimings, PhaseTiming{PhaseGroup: "smtp_transport", PhaseTask: "smtp_transport", StartedAtMs: int(smtpStart.Sub(analysisStart).Milliseconds()), DurationMs: smtpDurMs})
+        if progressCb != nil {
+                progressCb("smtp_transport", "done", smtpDurMs)
+        }
 
         enrichBasicRecords(basic, resultsMap)
 
@@ -168,12 +283,20 @@ func (a *Analyzer) assembleResults(ctx context.Context, domain string, resultsMa
         engineStart := time.Now()
         a.enrichWithHostingAndSecurity(ctx, domain, results, resultsMap, spfAnalysis)
         populateExtendedResults(results, resultsMap)
-        a.enrichWithPostAnalysis(ctx, domain, results, resultsMap, options)
+        web3Timing := a.enrichWithPostAnalysis(ctx, domain, results, resultsMap, options, analysisStart)
+        seqTimings = append(seqTimings, web3Timing)
 
         results["is_tld"] = isTLD
-        results["posture"] = a.CalculatePosture(results)
-        results["remediation"] = a.GenerateRemediation(results)
-        results["mail_posture"] = buildMailPosture(results)
+        results["analysis_scope"] = string(analysisScope)
+        if analysisScope == ScopeGatewayDerived {
+                results["posture"] = buildGatewayPosture(results)
+                results["remediation"] = map[string]any{"status": "not_applicable", "reason": "gateway_derived", "items": []any{}}
+                results["mail_posture"] = map[string]any{"status": "not_applicable", "reason": "gateway_derived"}
+        } else {
+                results["posture"] = a.CalculatePosture(results)
+                results["remediation"] = a.GenerateRemediation(results)
+                results["mail_posture"] = buildMailPosture(results)
+        }
 
         populateTTLReports(results)
         engineDur := time.Since(engineStart)
@@ -243,7 +366,7 @@ func populateExtendedResults(results, resultsMap map[string]any) {
         results[mapKeyDnssecOps] = getOrDefault(resultsMap, mapKeyDnssecOps, map[string]any{mapKeyStatus: statusInfoOrch, mapKeyMessage: strNotChecked})
 }
 
-func (a *Analyzer) enrichWithPostAnalysis(ctx context.Context, domain string, results, resultsMap map[string]any, options AnalysisOptions) {
+func (a *Analyzer) enrichWithPostAnalysis(ctx context.Context, domain string, results, resultsMap map[string]any, options AnalysisOptions, analysisStart time.Time) PhaseTiming {
         if options.ExposureChecks {
                 exposureStart := time.Now()
                 results["web_exposure"] = a.ScanWebExposure(ctx, domain)
@@ -251,6 +374,27 @@ func (a *Analyzer) enrichWithPostAnalysis(ctx context.Context, domain string, re
         }
 
         results["saas_txt"] = ExtractSaaSTXTFootprint(results)
+
+        progressCb := options.OnPhaseProgress
+
+        web3Start := time.Now()
+        if progressCb != nil {
+                progressCb("web3_analysis", "running", 0)
+        }
+        basicForWeb3 := getMapResult(results, mapKeyBasicRecords)
+        txtRecords := ExtractTXTFromBasicRecords(basicForWeb3)
+        dnssecForWeb3 := getMapResult(results, "dnssec_analysis")
+        web3Result := a.AnalyzeWeb3(ctx, domain, txtRecords, dnssecForWeb3)
+        results[mapKeyWeb3] = web3Result
+        web3Dur := time.Since(web3Start)
+        web3DurMs := int(web3Dur.Milliseconds())
+        slog.Info(logTaskCompleted, mapKeyTaskOrch, "web3_analysis", mapKeyDomain, domain, mapKeyElapsedMs, fmt.Sprintf(fmtElapsedMs, float64(web3DurMs)))
+        if progressCb != nil {
+                progressCb("web3_analysis", "done", web3DurMs)
+        }
+
+        a.enrichWeb3WithFleetProbe(ctx, domain, web3Result)
+
         results["asn_info"] = a.LookupASN(ctx, results)
         results["edge_cdn"] = DetectEdgeCDN(results)
         enrichHostingFromEdgeCDN(results)
@@ -258,6 +402,13 @@ func (a *Analyzer) enrichWithPostAnalysis(ctx context.Context, domain string, re
         ctData := getMapResult(resultsMap, mapKeyCtSubdomains)
         ctSubdomains, _ := ctData[mapKeySubdomains].([]map[string]any)
         results["dangling_dns"] = a.DetectDanglingDNS(ctx, domain, ctSubdomains)
+
+        return PhaseTiming{
+                PhaseGroup:  "web3_analysis",
+                PhaseTask:   "web3_analysis",
+                StartedAtMs: int(web3Start.Sub(analysisStart).Milliseconds()),
+                DurationMs:  web3DurMs,
+        }
 }
 
 func populateTTLReports(results map[string]any) {
@@ -335,54 +486,109 @@ func timedTask(ch chan<- namedResult, key string, analysisStart time.Time, fn fu
         }
 }
 
-func (a *Analyzer) buildCoreTasks(ctx context.Context, domain string, ch chan namedResult, t0 time.Time) []func() {
-        return []func(){
-                timedTask(ch, "basic", t0, func() any { return a.GetBasicRecords(ctx, domain) }),
-                timedTask(ch, "auth", t0, func() any { return a.GetAuthoritativeRecords(ctx, domain) }),
-                timedTask(ch, "caa", t0, func() any { return a.AnalyzeCAA(ctx, domain) }),
-                timedTask(ch, "dnssec", t0, func() any { return a.AnalyzeDNSSEC(ctx, domain) }),
-                timedTask(ch, "ns_delegation", t0, func() any { return a.AnalyzeNSDelegation(ctx, domain) }),
-                timedTask(ch, mapKeyRegistrar, t0, func() any { return a.GetRegistrarInfo(ctx, domain) }),
-                timedTask(ch, mapKeyResolverConsensus, t0, func() any { return a.DNS.ValidateResolverConsensus(ctx, domain) }),
-                timedTask(ch, mapKeyHttpsSvcb, t0, func() any { return a.AnalyzeHTTPSSVCB(ctx, domain) }),
-                timedTask(ch, mapKeyCdsCdnskey, t0, func() any { return a.AnalyzeCDSCDNSKEY(ctx, domain) }),
-                timedTask(ch, mapKeyNmapDns, t0, func() any { return a.AnalyzeNmapDNS(ctx, domain) }),
-                timedTask(ch, mapKeyDelegationConsistency, t0, func() any { return a.AnalyzeDelegationConsistency(ctx, domain) }),
-                timedTask(ch, mapKeyNsFleet, t0, func() any { return a.AnalyzeNSFleet(ctx, domain) }),
-                timedTask(ch, mapKeyDnssecOps, t0, func() any { return a.AnalyzeDNSSECOps(ctx, domain) }),
+func timedTaskWithProgress(ch chan<- namedResult, key string, analysisStart time.Time, progressCb ProgressCallback, fn func() any) func() {
+        return func() {
+                group := LookupPhaseGroup(key)
+                if progressCb != nil {
+                        progressCb(group, "running", 0)
+                }
+                start := time.Now()
+                result := fn()
+                ch <- namedResult{key, result, time.Since(start), start.Sub(analysisStart)}
         }
 }
 
-func (a *Analyzer) buildDomainTasks(ctx context.Context, domain string, customDKIMSelectors []string, ch chan namedResult, t0 time.Time) []func() {
+func (a *Analyzer) buildCoreTasks(ctx context.Context, domain string, ch chan namedResult, t0 time.Time, progressCb ProgressCallback) []func() {
+        tt := func(key string, fn func() any) func() {
+                return timedTaskWithProgress(ch, key, t0, progressCb, fn)
+        }
         return []func(){
-                timedTask(ch, mapKeySpfOrch, t0, func() any { return a.AnalyzeSPF(ctx, domain) }),
-                timedTask(ch, mapKeyDmarc, t0, func() any { return a.AnalyzeDMARC(ctx, domain) }),
-                timedTask(ch, mapKeyDkimOrch, t0, func() any { return a.AnalyzeDKIM(ctx, domain, nil, customDKIMSelectors) }),
-                timedTask(ch, mapKeyMtaSts, t0, func() any { return a.AnalyzeMTASTS(ctx, domain) }),
-                timedTask(ch, mapKeyTlsrpt, t0, func() any { return a.AnalyzeTLSRPT(ctx, domain) }),
-                timedTask(ch, mapKeyBimi, t0, func() any { return a.AnalyzeBIMI(ctx, domain) }),
-                timedTask(ch, mapKeyCtSubdomains, t0, func() any { return a.discoverSubdomainsWithBudget(domain) }),
-                timedTask(ch, mapKeySmimeaOpenpgpkey, t0, func() any { return a.AnalyzeSMIMEA(ctx, domain) }),
-                timedTask(ch, mapKeySecurityTxt, t0, func() any { return a.AnalyzeSecurityTxt(ctx, domain) }),
-                timedTask(ch, mapKeyAiSurface, t0, func() any { return a.AnalyzeAISurface(ctx, domain) }),
-                timedTask(ch, mapKeySecretExposure, t0, func() any { return a.ScanSecretExposure(ctx, domain) }),
+                tt("basic", func() any { return a.GetBasicRecords(ctx, domain) }),
+                tt("auth", func() any { return a.GetAuthoritativeRecords(ctx, domain) }),
+                tt("caa", func() any { return a.AnalyzeCAA(ctx, domain) }),
+                tt("dnssec", func() any { return a.AnalyzeDNSSEC(ctx, domain) }),
+                tt("ns_delegation", func() any { return a.AnalyzeNSDelegation(ctx, domain) }),
+                tt(mapKeyRegistrar, func() any { return a.GetRegistrarInfo(ctx, domain) }),
+                tt(mapKeyResolverConsensus, func() any { return a.DNS.ValidateResolverConsensus(ctx, domain) }),
+                tt(mapKeyHttpsSvcb, func() any { return a.AnalyzeHTTPSSVCB(ctx, domain) }),
+                tt(mapKeyCdsCdnskey, func() any { return a.AnalyzeCDSCDNSKEY(ctx, domain) }),
+                tt(mapKeyNmapDns, func() any { return a.AnalyzeNmapDNS(ctx, domain) }),
+                tt(mapKeyDelegationConsistency, func() any { return a.AnalyzeDelegationConsistency(ctx, domain) }),
+                tt(mapKeyNsFleet, func() any { return a.AnalyzeNSFleet(ctx, domain) }),
+                tt(mapKeyDnssecOps, func() any { return a.AnalyzeDNSSECOps(ctx, domain) }),
         }
 }
 
-func (a *Analyzer) discoverSubdomainsWithBudget(domain string) map[string]any {
-        ctCtx, ctCancel := context.WithTimeout(context.Background(), 120*time.Second)
+func (a *Analyzer) buildDomainTasks(ctx context.Context, domain string, customDKIMSelectors []string, ch chan namedResult, t0 time.Time, progressCb ProgressCallback) []func() {
+        tt := func(key string, fn func() any) func() {
+                return timedTaskWithProgress(ch, key, t0, progressCb, fn)
+        }
+        return []func(){
+                tt(mapKeySpfOrch, func() any { return a.AnalyzeSPF(ctx, domain) }),
+                tt(mapKeyDmarc, func() any { return a.AnalyzeDMARC(ctx, domain) }),
+                tt(mapKeyDkimOrch, func() any { return a.AnalyzeDKIM(ctx, domain, nil, customDKIMSelectors) }),
+                tt(mapKeyMtaSts, func() any { return a.AnalyzeMTASTS(ctx, domain) }),
+                tt(mapKeyTlsrpt, func() any { return a.AnalyzeTLSRPT(ctx, domain) }),
+                tt(mapKeyBimi, func() any { return a.AnalyzeBIMI(ctx, domain) }),
+                tt(mapKeyCtSubdomains, func() any { return a.discoverSubdomainsWithBudget(ctx, domain) }),
+                tt(mapKeySmimeaOpenpgpkey, func() any { return a.AnalyzeSMIMEA(ctx, domain) }),
+                tt(mapKeySecurityTxt, func() any { return a.AnalyzeSecurityTxt(ctx, domain) }),
+                tt(mapKeyAiSurface, func() any { return a.AnalyzeAISurface(ctx, domain) }),
+                tt(mapKeySecretExposure, func() any { return a.ScanSecretExposure(ctx, domain) }),
+        }
+}
+
+func (a *Analyzer) discoverSubdomainsWithBudget(parent context.Context, domain string) map[string]any {
+        budget := 20 * time.Second
+        if deadline, ok := parent.Deadline(); ok {
+                if remaining := time.Until(deadline); remaining < budget {
+                        budget = remaining
+                }
+        }
+        if budget <= 0 {
+                slog.Warn("CT subdomain budget exhausted by parent deadline", mapKeyDomain, domain)
+                return map[string]any{"status": "deferred", "reason": "parent_deadline_exhausted"}
+        }
+        ctCtx, ctCancel := context.WithTimeout(parent, budget)
         defer ctCancel()
         return a.DiscoverSubdomains(ctCtx, domain)
 }
 
 func (a *Analyzer) runParallelAnalyses(ctx context.Context, domain string, customDKIMSelectors []string, analysisStart time.Time, progressCb ProgressCallback) (map[string]any, []PhaseTiming) {
+        return a.runScopedAnalyses(ctx, domain, customDKIMSelectors, analysisStart, progressCb, ScopeOwnedDNS)
+}
+
+var emailProtocolKeys = map[string]bool{
+        mapKeySpfOrch:        true,
+        mapKeyDmarc:          true,
+        mapKeyDkimOrch:       true,
+        mapKeyMtaSts:         true,
+        mapKeyTlsrpt:         true,
+        mapKeyBimi:           true,
+        mapKeySmimeaOpenpgpkey: true,
+}
+
+func (a *Analyzer) buildGatewaySkippedResults() map[string]any {
+        results := make(map[string]any)
+        for key := range emailProtocolKeys {
+                results[key] = map[string]any{mapKeyStatus: "skipped", "reason": "gateway_attribution"}
+        }
+        return results
+}
+
+func (a *Analyzer) runScopedAnalyses(ctx context.Context, domain string, customDKIMSelectors []string, analysisStart time.Time, progressCb ProgressCallback, scope AnalysisScope) (map[string]any, []PhaseTiming) {
         resultsCh := make(chan namedResult, 28)
         var wg sync.WaitGroup
 
-        tasks := a.buildCoreTasks(ctx, domain, resultsCh, analysisStart)
+        tasks := a.buildCoreTasks(ctx, domain, resultsCh, analysisStart, progressCb)
 
         if !dnsclient.IsTLDInput(domain) {
-                tasks = append(tasks, a.buildDomainTasks(ctx, domain, customDKIMSelectors, resultsCh, analysisStart)...)
+                if scope == ScopeGatewayDerived {
+                        gatewayTasks := a.buildGatewayDomainTasks(ctx, domain, resultsCh, analysisStart, progressCb)
+                        tasks = append(tasks, gatewayTasks...)
+                } else {
+                        tasks = append(tasks, a.buildDomainTasks(ctx, domain, customDKIMSelectors, resultsCh, analysisStart, progressCb)...)
+                }
         }
 
         for _, fn := range tasks {
@@ -399,23 +605,92 @@ func (a *Analyzer) runParallelAnalyses(ctx context.Context, domain string, custo
         }()
 
         resultsMap := make(map[string]any)
+        if scope == ScopeGatewayDerived {
+                for k, v := range a.buildGatewaySkippedResults() {
+                        resultsMap[k] = v
+                }
+        }
+
         var timings []PhaseTiming
         for nr := range resultsCh {
                 resultsMap[nr.key] = nr.result
                 durMs := int(nr.elapsed.Milliseconds())
                 group := LookupPhaseGroup(nr.key)
                 slog.Info(logTaskCompleted, mapKeyTaskOrch, nr.key, mapKeyDomain, domain, mapKeyElapsedMs, fmt.Sprintf(fmtElapsedMs, float64(durMs)))
-                timings = append(timings, PhaseTiming{
+                pt := PhaseTiming{
                         PhaseGroup:  group,
                         PhaseTask:   nr.key,
                         StartedAtMs: int(nr.startOffset.Milliseconds()),
                         DurationMs:  durMs,
-                })
+                }
+                pt.RecordCount, pt.Error = extractResultMeta(nr.result)
+                timings = append(timings, pt)
                 if progressCb != nil {
                         progressCb(group, "done", durMs)
                 }
         }
         return resultsMap, timings
+}
+
+func (a *Analyzer) buildGatewayDomainTasks(ctx context.Context, domain string, ch chan namedResult, t0 time.Time, progressCb ProgressCallback) []func() {
+        tt := func(key string, fn func() any) func() {
+                return timedTaskWithProgress(ch, key, t0, progressCb, fn)
+        }
+        return []func(){
+                tt(mapKeyCtSubdomains, func() any { return a.discoverSubdomainsWithBudget(ctx, domain) }),
+                tt(mapKeySecurityTxt, func() any { return a.AnalyzeSecurityTxt(ctx, domain) }),
+                tt(mapKeyAiSurface, func() any { return a.AnalyzeAISurface(ctx, domain) }),
+                tt(mapKeySecretExposure, func() any { return a.ScanSecretExposure(ctx, domain) }),
+        }
+}
+
+func extractResultMeta(result any) (recordCount int, errMsg string) {
+        m, ok := result.(map[string]any)
+        if !ok {
+                return 0, ""
+        }
+        if e, ok := m["error"]; ok {
+                if s, ok := e.(string); ok && s != "" {
+                        errMsg = s
+                }
+        }
+        if records, ok := m["records"]; ok {
+                recordCount = countSlice(records)
+        }
+        if recordCount == 0 {
+                if cnt, ok := m["count"]; ok {
+                        recordCount = toInt(cnt)
+                }
+        }
+        return recordCount, errMsg
+}
+
+func countSlice(v any) int {
+        switch s := v.(type) {
+        case []any:
+                return len(s)
+        case []string:
+                return len(s)
+        case []map[string]any:
+                return len(s)
+        default:
+                return 0
+        }
+}
+
+func toInt(v any) int {
+        switch n := v.(type) {
+        case int:
+                return n
+        case int32:
+                return int(n)
+        case int64:
+                return int(n)
+        case float64:
+                return int(n)
+        default:
+                return 0
+        }
 }
 
 func buildRecordCurrencies(resolverTTLMap map[string]uint32) []icuae.RecordCurrency {
@@ -650,6 +925,7 @@ func (a *Analyzer) buildNonExistentResult(domain, status string, statusMessage *
                 "asn_info":                  map[string]any{mapKeyStatus: statusInfoOrch, "ipv4_asn": []map[string]any{}, "ipv6_asn": []map[string]any{}, "unique_asns": []map[string]any{}, mapKeyIssues: []string{}},
                 "edge_cdn":                  map[string]any{mapKeyStatus: mapKeySuccess, "is_behind_cdn": false, "cdn_provider": "", "cdn_indicators": []string{}, "origin_visible": true, mapKeyIssues: []string{}},
                 "dangling_dns":              map[string]any{mapKeyStatus: mapKeySuccess, "checked": true, "dangling_count": 0, "dangling_records": []map[string]any{}, mapKeyIssues: []string{}},
+                mapKeyWeb3:                  DefaultWeb3Analysis(),
                 mapKeyDelegationConsistency: map[string]any{mapKeyStatus: statusInfoOrch, mapKeyMessage: msgDomainNoExist},
                 mapKeyNsFleet:               map[string]any{mapKeyStatus: statusInfoOrch, mapKeyMessage: msgDomainNoExist, "fleet": []map[string]any{}, mapKeyIssues: []string{}},
                 mapKeyDnssecOps:             map[string]any{mapKeyStatus: statusInfoOrch, mapKeyMessage: msgDomainNoExist},
@@ -725,4 +1001,45 @@ func keysOf(m map[string]bool) []string {
                 keys = append(keys, k)
         }
         return keys
+}
+
+func buildAnalysisProvenance(inputKind InputKind, scope AnalysisScope, web3 Web3ResolutionResult, results map[string]any) map[string]any {
+        p := map[string]any{
+                "input_kind":     string(inputKind),
+                "analysis_scope": string(scope),
+        }
+        if web3.IsWeb3Input {
+                p["resolution_type"] = web3.ResolutionType
+                p["gateway_detected"] = web3.IsGatewayDomain
+                p["attribution_warning_emitted"] = web3.AttributionWarning != ""
+                if web3.Gateway != "" {
+                        p["gateway"] = web3.Gateway
+                }
+        }
+        if w3a, ok := results[mapKeyWeb3].(map[string]any); ok {
+                if ds, ok := w3a["dnslink_source"].(string); ok && ds != "" {
+                        p["dnslink_source"] = ds
+                }
+        }
+        if skip, ok := results["skip_reason"].(string); ok && skip != "" {
+                p["skip_reason"] = skip
+        }
+        return p
+}
+
+func buildGatewayPosture(results map[string]any) map[string]any {
+        return map[string]any{
+                "risk":             "attribution_limited",
+                "risk_label":       "Gateway Derived",
+                "score":            0,
+                "grade":            "N/A",
+                "reason":           "gateway_derived",
+                "issues":           []string{},
+                "recommendations":  []string{},
+                "monitoring":       []string{},
+                "configured":       []string{},
+                "absent":           []string{},
+                "provider_limited": []string{},
+                "attribution_note": "Posture scoring is suppressed for gateway-derived analysis. DNS infrastructure results reflect the gateway operator, not the domain owner.",
+        }
 }
