@@ -91,7 +91,35 @@ func (a *Analyzer) InvestigateIP(ctx context.Context, domain, ip string) map[str
 	return result
 }
 
-func buildArpaName(ip string) string {
+func reverseIPv4(ip string) string {
+  	parts := strings.Split(ip, ".")
+  	if len(parts) != 4 {
+  		return ""
+  	}
+  	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+  		parts[i], parts[j] = parts[j], parts[i]
+  	}
+  	return strings.Join(parts, ".")
+  }
+
+  func reverseIPv6(ip string) string {
+  	parsed := net.ParseIP(ip)
+  	if parsed == nil {
+  		return ""
+  	}
+  	expanded := parsed.To16()
+  	if expanded == nil {
+  		return ""
+  	}
+  	hex := fmt.Sprintf("%032x", expanded)
+  	var nibbles []string
+  	for i := len(hex) - 1; i >= 0; i-- {
+  		nibbles = append(nibbles, string(hex[i]))
+  	}
+  	return strings.Join(nibbles, ".")
+  }
+
+  func buildArpaName(ip string) string {
 	if IsIPv6(ip) {
 		reversed := reverseIPv6(ip)
 		if reversed == "" {

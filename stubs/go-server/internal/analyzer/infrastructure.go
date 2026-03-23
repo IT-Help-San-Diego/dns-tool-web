@@ -34,7 +34,17 @@ var nsProviderPatterns = map[string]string{}
 var webHostingPatterns = map[string]string{}
 var ptrHostingPatterns = map[string]string{}
 
-func (a *Analyzer) AnalyzeDNSInfrastructure(domain string, results map[string]any) map[string]any {
+type dynamicServiceInfo struct {
+  	Name string
+  	Caps []string
+  }
+
+  type dsDetection struct {
+  	Service dynamicServiceInfo
+  	Caps    []string
+  }
+
+  func (a *Analyzer) AnalyzeDNSInfrastructure(domain string, results map[string]any) map[string]any {
         return map[string]any{
                 "provider_tier":      "standard",
                 "provider_features":  []string{},
