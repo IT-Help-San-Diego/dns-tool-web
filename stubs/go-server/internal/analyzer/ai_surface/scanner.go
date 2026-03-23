@@ -8,11 +8,16 @@
   	"net/http"
   )
 
-  type Scanner struct {
-  	HTTP *http.Client
+  type HTTPClient interface {
+  	Get(ctx context.Context, rawURL string) (*http.Response, error)
+  	ReadBody(resp *http.Response, maxBytes int64) ([]byte, error)
   }
 
-  func NewScanner(httpClient *http.Client) *Scanner {
+  type Scanner struct {
+  	HTTP HTTPClient
+  }
+
+  func NewScanner(httpClient HTTPClient) *Scanner {
   	return &Scanner{HTTP: httpClient}
   }
 
