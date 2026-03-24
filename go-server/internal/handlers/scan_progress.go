@@ -1,13 +1,17 @@
 package handlers
 
+// dns-tool:scrutiny design
+
 import (
         "crypto/rand"
         "encoding/hex"
+        "log/slog"
         "net/http"
         "sync"
         "time"
 
         "dnstool/go-server/internal/analyzer"
+        "dnstool/go-server/internal/logging"
 
         "github.com/gin-gonic/gin"
 )
@@ -17,6 +21,8 @@ type phaseStatus struct {
         DurationMs    int    `json:"duration_ms,omitempty"`
         CompletedAtMs int    `json:"completed_at_ms,omitempty"`
         StartedAtMs   int    `json:"started_at_ms,omitempty"`
+        expectedTasks int
+        completedTasks int
 }
 
 type scanProgress struct {
@@ -31,13 +37,29 @@ type scanProgress struct {
 }
 
 type ProgressStore struct {
-        store sync.Map
+        store    sync.Map
+        stopCh   chan struct{}
+        doneCh   chan struct{}
+        closeOnce sync.Once
 }
 
 func NewProgressStore() *ProgressStore {
-        ps := &ProgressStore{}
+        ps := &ProgressStore{
+                stopCh: make(chan struct{}),
+                doneCh: make(chan struct{}),
+        }
         go ps.cleanupLoop()
         return ps
+}
+
+func (ps *ProgressStore) Close() {
+        if ps.stopCh == nil {
+                return
+        }
+        ps.closeOnce.Do(func() {
+                close(ps.stopCh)
+                <-ps.doneCh
+        })
 }
 
 func (ps *ProgressStore) NewToken() (string, *scanProgress) {
@@ -45,13 +67,18 @@ func (ps *ProgressStore) NewToken() (string, *scanProgress) {
         _, _ = rand.Read(b)
         token := hex.EncodeToString(b)
 
+        callbackCounts := analyzer.PhaseGroupCallbackCounts()
+
         progress := &scanProgress{
                 startTime: time.Now(),
                 phases:    make(map[string]*phaseStatus),
         }
 
         for _, group := range analyzer.PhaseGroupOrder {
-                progress.phases[group] = &phaseStatus{Status: "pending"}
+                progress.phases[group] = &phaseStatus{
+                        Status:        "pending",
+                        expectedTasks: callbackCounts[group],
+                }
         }
 
         ps.store.Store(token, progress)
@@ -71,16 +98,22 @@ func (ps *ProgressStore) Delete(token string) {
 }
 
 func (ps *ProgressStore) cleanupLoop() {
+        defer close(ps.doneCh)
         ticker := time.NewTicker(60 * time.Second)
         defer ticker.Stop()
-        for range ticker.C {
-                ps.store.Range(func(key, val any) bool {
-                        sp := val.(*scanProgress)
-                        if time.Since(sp.startTime) > 5*time.Minute {
-                                ps.store.Delete(key)
-                        }
-                        return true
-                })
+        for {
+                select {
+                case <-ps.stopCh:
+                        return
+                case <-ticker.C:
+                        ps.store.Range(func(key, val any) bool {
+                                sp := val.(*scanProgress)
+                                if time.Since(sp.startTime) > 5*time.Minute {
+                                        ps.store.Delete(key)
+                                }
+                                return true
+                        })
+                }
         }
 }
 
@@ -94,19 +127,26 @@ func (sp *scanProgress) UpdatePhase(group, status string, durationMs int) {
                 if startedAt < 0 {
                         startedAt = 0
                 }
-                sp.phases[group] = &phaseStatus{Status: status, DurationMs: durationMs, CompletedAtMs: elapsedMs, StartedAtMs: startedAt}
+                sp.phases[group] = &phaseStatus{Status: status, DurationMs: durationMs, CompletedAtMs: elapsedMs, StartedAtMs: startedAt, expectedTasks: 1, completedTasks: 1}
                 return
         }
         if ps.Status == "done" {
                 return
         }
-        if ps.StartedAtMs == 0 && status == "running" {
+        if ps.StartedAtMs == 0 {
                 ps.StartedAtMs = elapsedMs
         }
-        ps.Status = status
-        ps.DurationMs = durationMs
         if status == "done" {
-                ps.CompletedAtMs = elapsedMs
+                ps.completedTasks++
+                ps.DurationMs += durationMs
+                if ps.expectedTasks > 0 && ps.completedTasks >= ps.expectedTasks {
+                        ps.Status = "done"
+                        ps.CompletedAtMs = elapsedMs
+                } else {
+                        ps.Status = "running"
+                }
+        } else {
+                ps.Status = status
         }
 }
 
@@ -116,9 +156,14 @@ func (sp *scanProgress) MarkComplete(analysisID int32, redirectURL string) {
         sp.complete = true
         sp.analysisID = analysisID
         sp.redirectURL = redirectURL
+        elapsedMs := int(time.Since(sp.startTime).Milliseconds())
         for _, ps := range sp.phases {
                 if ps.Status != "done" {
                         ps.Status = "done"
+                        ps.completedTasks = ps.expectedTasks
+                        if ps.CompletedAtMs == 0 {
+                                ps.CompletedAtMs = elapsedMs
+                        }
                 }
         }
 }
@@ -138,6 +183,20 @@ func (sp *scanProgress) MakeProgressCallback() analyzer.ProgressCallback {
         }
 }
 
+func (sp *scanProgress) MakeInstrumentedProgressCallback(domain, traceID string) analyzer.ProgressCallback {
+        return func(group, status string, durationMs int) {
+                if status == "running" || status == "started" {
+                        slog.LogAttrs(nil, slog.LevelDebug, "phase started",
+                                logging.PhaseStarted(domain, traceID, group, "")...)
+                }
+                sp.UpdatePhase(group, status, durationMs)
+                if status == "done" {
+                        slog.LogAttrs(nil, slog.LevelDebug, "phase finished",
+                                logging.PhaseFinished(domain, traceID, group, "", int64(durationMs), "success")...)
+                }
+        }
+}
+
 func (sp *scanProgress) toJSON() map[string]any {
         sp.mu.Lock()
         defer sp.mu.Unlock()
@@ -152,12 +211,17 @@ func (sp *scanProgress) toJSON() map[string]any {
 
         phases := make(map[string]any, len(sp.phases))
         for group, ps := range sp.phases {
-                phases[group] = map[string]any{
+                p := map[string]any{
                         "status":          ps.Status,
                         "duration_ms":     ps.DurationMs,
                         "completed_at_ms": ps.CompletedAtMs,
                         "started_at_ms":   ps.StartedAtMs,
                 }
+                if ps.expectedTasks > 0 {
+                        p["tasks_total"] = ps.expectedTasks
+                        p["tasks_done"] = ps.completedTasks
+                }
+                phases[group] = p
         }
 
         result := map[string]any{

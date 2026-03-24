@@ -1,6 +1,6 @@
 # DNS Tool — Roadmap
 
-> Last updated: March 2, 2026
+> Last updated: March 17, 2026
 
 ---
 
@@ -108,6 +108,11 @@
 | Font Awesome CSS Direct Loading Fix | v26.34.38 | Mar 2026 |
 | ROE Modal iOS Fix (touchend, aria-hidden, debounce) | v26.34.38 | Mar 2026 |
 | Wayback Machine Automatic Archival (Internet Archive Integration) | v26.34.39 | Mar 2026 |
+| Web3 Phase 2 — ENS/HNS Input Resolution Engine | v26.35.xx | Mar 2026 |
+| Web3 Phase 3–5 — Typed Evidence Model, Input Classification, Attribution Guard | v26.35.xx | Mar 2026 |
+| Web3 Phase 6 — Authority Containment (S001–S007) | v26.37.xx | Mar 2026 |
+| Web3 Phase 7 — IPFS Fleet Probe (W001–W005) | v26.37.24 | Mar 2026 |
+| IPFS SSRF Redirect Containment + Security Tests | v26.37.24 | Mar 2026 |
 
 ---
 
@@ -115,6 +120,7 @@
 
 | Feature | Status | Priority | Notes |
 |---------|--------|----------|-------|
+| Live Pipeline Topology — Scan Progress Visualization | In Progress | High | Replace flat-blue scan overlay with per-protocol colored topology. Phase 1: accurate phase completion semantics (task counting). Phase 2: SVG glow effects with topology colors (dns=#5c6bc0, email=#4fc3f7, dnssec=#81c784, ct=#78909c, smtp=#81c784, policy=#ffb74d, registrar=#ce93d8, engine=#e0e0e0). Phase 3: Admin pipeline control page with Gantt timeline and cross-scan comparison. Phase 4: dig vs in-process DNS benchmark. |
 | Non-Authenticated Zone Upload (One-Time View) | In Progress | High | Open zone upload to non-auth users with 1 MB limit, IP rate limiting, no persistence — funnel to signup |
 | SonarCloud Coverage Push (80%+ Target) | In Progress | High | Systematic coverage improvement across handlers, analyzer, dnsclient, and middleware packages |
 | Visual Cohesion — Top-to-Bottom Consistency | In Progress | Medium | Glass treatment, question branding, and token system across all report modes |
@@ -172,7 +178,7 @@
 
 ### Completed Items
 
-All items in the "Completed" section have working implementations in the codebase (v26.20.0–v26.33.65 as of March 2026). Every item has either been verified by test suites, deployed to production, or demonstrated in public releases.
+All items in the "Completed" section have working implementations in the codebase (v26.20.0–v26.37.24 as of March 2026). Every item has either been verified by test suites, deployed to production, or demonstrated in public releases.
 
 **Key completions**:
 - **Authentication (v26.20.56–57)**: Zero-friction paste-and-go remains; login is optional, premium features require authentication.
@@ -205,11 +211,12 @@ This item should not advance to queued until core architects and the security re
 
 ## Version & Maintenance
 
-**Last Updated**: March 3, 2026  
-**Next Review**: Post-v26.34.0 release or every two weeks  
+**Last Updated**: March 17, 2026  
+**Current Version**: v26.37.24  
+**Next Review**: Post-v26.38.0 release or every two weeks  
 **Owner**: DNS Tool Architecture Team
 
 When marking items as complete:
 1. Cite the version number where implementation occurred
 2. Update this document within the same session
-3. Archive detailed release notes in `EVOLUTION.md`
+3. Archive detailed release notes in `evolution/`

@@ -11,6 +11,7 @@ import (
         "log/slog"
         "net/http"
         "net/url"
+        "os"
         "strings"
         "time"
 
@@ -70,6 +71,7 @@ func SecurityHeaders(isDev ...bool) gin.HandlerFunc {
         return func(c *gin.Context) {
                 if strings.HasPrefix(c.Request.URL.Path, "/static/") {
                         c.Header("X-Content-Type-Options", "nosniff")
+                        c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'")
                         c.Next()
                         return
                 }
@@ -95,7 +97,7 @@ func extractNonceStr(c *gin.Context) string {
 func setCommonSecurityHeaders(c *gin.Context, devMode bool) {
         c.Header("X-Content-Type-Options", "nosniff")
         if !devMode {
-                if c.Request.URL.Path == "/signature" {
+                if c.Request.URL.Path == "/signature" || strings.HasPrefix(c.Request.URL.Path, "/docs/") {
                         c.Header("X-Frame-Options", "SAMEORIGIN")
                 } else {
                         c.Header("X-Frame-Options", "DENY")
@@ -115,19 +117,34 @@ func setCommonSecurityHeaders(c *gin.Context, devMode bool) {
 }
 
 func buildCSP(c *gin.Context, nonceStr string, devMode bool) string {
+        replitWidget := replitWidgetCSP()
+
         connectSrc := "connect-src 'self'; "
         if devMode {
                 connectSrc = "connect-src 'self' https://replit.com https://*.replit.com https://*.replit.dev; "
+        } else if replitWidget {
+                connectSrc = "connect-src 'self' https://replit.com https://*.replit.com; "
         }
 
         frameAncestors := "frame-ancestors 'none'; "
         if devMode {
                 frameAncestors = "frame-ancestors https://replit.com https://*.replit.com https://*.replit.dev https://*.replit.app https://*.picard.replit.dev; "
+        } else if strings.HasPrefix(c.Request.URL.Path, "/docs/") {
+                frameAncestors = "frame-ancestors 'self'; "
         }
 
         frameSrc := "frame-src 'none'; "
-        if c.Request.URL.Path == "/signature" {
+        if c.Request.URL.Path == "/signature" || c.Request.URL.Path == "/corpus" {
                 frameSrc = "frame-src 'self'; "
+        } else if c.Request.URL.Path == "/video/forgotten-domain" {
+                frameSrc = "frame-src https://www.youtube-nocookie.com; "
+        } else if replitWidget {
+                frameSrc = "frame-src https://replit.com https://*.replit.com; "
+        }
+
+        scriptSrc := fmt.Sprintf("script-src 'self' 'nonce-%s'; ", nonceStr)
+        if replitWidget && !devMode {
+                scriptSrc = fmt.Sprintf("script-src 'self' 'nonce-%s' https://replit.com https://*.replit.com; ", nonceStr)
         }
 
         upgradeDirective := ""
@@ -137,10 +154,10 @@ func buildCSP(c *gin.Context, nonceStr string, devMode bool) string {
 
         return fmt.Sprintf(
                 "default-src 'none'; "+
-                        "script-src 'self' 'nonce-%s'; "+
+                        "%s"+
                         "style-src 'self' 'nonce-%s'; "+
                         "font-src 'self'; "+
-                        "img-src 'self' data: blob: https:; "+
+                        "img-src 'self' data: blob:; "+
                         "%s"+
                         "%s"+
                         "base-uri 'none'; "+
@@ -151,8 +168,12 @@ func buildCSP(c *gin.Context, nonceStr string, devMode bool) string {
                         "media-src 'self'; "+
                         "worker-src 'self'; "+
                         "%s",
-                nonceStr, nonceStr, connectSrc, frameAncestors, frameSrc, upgradeDirective,
+                scriptSrc, nonceStr, connectSrc, frameAncestors, frameSrc, upgradeDirective,
         )
+}
+
+func replitWidgetCSP() bool {
+        return os.Getenv("REPLIT_DEPLOYMENT") != ""
 }
 
 func Recovery(appVersion string, opts ...map[string]any) gin.HandlerFunc {

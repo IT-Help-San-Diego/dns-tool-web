@@ -10,7 +10,7 @@ import (
 )
 
 var (
-        Version   = "26.37.10"
+        Version   = "26.38.25"
         GitCommit = "dev"
         BuildTime = "unknown"
 )
@@ -28,6 +28,7 @@ type Config struct {
         Port               string
         AppVersion         string
         SMTPProbeMode      string
+        IPFSProbeMode      string
         ProbeAPIURL        string
         ProbeAPIKey        string
         Probes             []ProbeEndpoint
@@ -41,6 +42,7 @@ type Config struct {
         BaseURL            string
         IsDevEnvironment   bool
         DiscordWebhookURL  string
+        YouTubeVideoIDs    map[string]string
 }
 
 var betaPagesMap = map[string]bool{
@@ -57,7 +59,10 @@ var sectionTuningMap = map[string]string{
 }
 
 func Load() (*Config, error) {
-        dbURL := os.Getenv("DATABASE_URL")
+        dbURL := os.Getenv("DATABASE_URL_OVERRIDE")
+        if dbURL == "" {
+                dbURL = os.Getenv("DATABASE_URL")
+        }
         if dbURL == "" {
                 return nil, fmt.Errorf("DATABASE_URL environment variable is required")
         }
@@ -75,12 +80,18 @@ func Load() (*Config, error) {
         googleRedirectURL := envOrDefault("GOOGLE_REDIRECT_URL", baseURL+"/auth/callback")
         betaPages := copyBetaPages()
 
+        ipfsProbeMode := envOrDefault("IPFS_PROBE_MODE", "off")
+        if ipfsProbeMode == "remote" && len(probes) == 0 {
+                ipfsProbeMode = "off"
+        }
+
         return &Config{
                 DatabaseURL:        dbURL,
                 SessionSecret:      sessionSecret,
                 Port:               port,
                 AppVersion:         Version,
                 SMTPProbeMode:      smtpProbeMode,
+                IPFSProbeMode:      ipfsProbeMode,
                 ProbeAPIURL:        probeAPIURL,
                 ProbeAPIKey:        os.Getenv("PROBE_API_KEY"),
                 Probes:             probes,
@@ -94,7 +105,22 @@ func Load() (*Config, error) {
                 BaseURL:            baseURL,
                 IsDevEnvironment:   isDevEnv,
                 DiscordWebhookURL:  os.Getenv("DISCORD_WEBHOOK_URL"),
+                YouTubeVideoIDs:    parseYouTubeIDs(os.Getenv("YOUTUBE_VIDEO_IDS")),
         }, nil
+}
+
+func parseYouTubeIDs(raw string) map[string]string {
+        m := make(map[string]string)
+        if raw == "" {
+                return m
+        }
+        for _, pair := range strings.Split(raw, ",") {
+                parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+                if len(parts) == 2 {
+                        m[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+                }
+        }
+        return m
 }
 
 func envOrDefault(key, defaultVal string) string {

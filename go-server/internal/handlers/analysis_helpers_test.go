@@ -33,11 +33,14 @@ func allTemplates() *gin.Engine {
                 "about.html", "admin.html", "admin_analytics.html", "admin_ops.html",
                 "admin_probes.html", "approach.html", "architecture.html", "audit_log.html",
                 "badge_embed.html", "brand_colors.html", "changelog.html", "color_science.html",
+                "communication_standards.html",
                 "compare.html", "compare_select.html", "confidence.html", "dossier.html",
-                "drift.html", "email_header.html", "failures.html", "faq_subdomains.html",
-                "history.html", "index.html", "investigate.html", "roadmap.html",
+                "drift.html", "ede.html", "email_header.html", "failures.html", "faq_subdomains.html",
+                "manifesto.html",
+                "history.html", "index.html", "investigate.html", "remediation.html", "roadmap.html",
                 "results.html", "results_covert.html", "results_executive.html",
-                "roe.html", "security_policy.html", "snapshot.html", "sources.html",
+                "roe.html", "security_policy.html", "signature.html", "signature_raw.html",
+                "snapshot.html", "sources.html",
                 "stats.html", "toolkit.html", "ttl_tuner.html", "watchlist.html",
                 "zone.html",
         }
@@ -308,6 +311,7 @@ func TestViewAnalysisBadID_CB7(t *testing.T) {
         cfg := testConfig()
         router := allTemplates()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.GET("/analysis/:id", handler.ViewAnalysis)
         w := httptest.NewRecorder()
         req := httptest.NewRequest(http.MethodGet, "/analysis/abc", nil)
@@ -324,6 +328,7 @@ func TestViewAnalysisMissing_CB7(t *testing.T) {
         cfg := testConfig()
         router := allTemplates()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.GET("/analysis/:id", handler.ViewAnalysis)
         w := httptest.NewRecorder()
         req := httptest.NewRequest(http.MethodGet, "/analysis/999999", nil)
@@ -340,6 +345,7 @@ func TestViewAnalysisExecutiveBadID_CB7(t *testing.T) {
         cfg := testConfig()
         router := allTemplates()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.GET("/analysis/:id/executive", handler.ViewAnalysisExecutive)
         w := httptest.NewRecorder()
         req := httptest.NewRequest(http.MethodGet, "/analysis/xyz/executive", nil)
@@ -356,6 +362,7 @@ func TestAnalyzeEmptyDomain_CB7(t *testing.T) {
         cfg := testConfig()
         router := allTemplates()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.POST("/analyze", handler.Analyze)
 
         form := url.Values{}
@@ -373,6 +380,7 @@ func TestAPIDNSHistoryMissing_CB7(t *testing.T) {
         cfg := testConfig()
         router := gin.New()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.GET("/api/dns-history/:domain", handler.APIDNSHistory)
         w := httptest.NewRecorder()
         req := httptest.NewRequest(http.MethodGet, "/api/dns-history/nonexistent.example.com", nil)
@@ -386,6 +394,7 @@ func TestAPIAnalysisMissing_CB7(t *testing.T) {
         cfg := testConfig()
         router := gin.New()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.GET("/api/analysis/:id", handler.APIAnalysis)
         w := httptest.NewRecorder()
         req := httptest.NewRequest(http.MethodGet, "/api/analysis/999999", nil)
@@ -402,6 +411,7 @@ func TestAPIAnalysisBadID_CB7(t *testing.T) {
         cfg := testConfig()
         router := gin.New()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.GET("/api/analysis/:id", handler.APIAnalysis)
         w := httptest.NewRecorder()
         req := httptest.NewRequest(http.MethodGet, "/api/analysis/abc", nil)
@@ -418,6 +428,7 @@ func TestAPIAnalysisChecksumMissing_CB7(t *testing.T) {
         cfg := testConfig()
         router := gin.New()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.GET("/api/analysis/:id/checksum", handler.APIAnalysisChecksum)
         w := httptest.NewRecorder()
         req := httptest.NewRequest(http.MethodGet, "/api/analysis/999999/checksum", nil)
@@ -434,6 +445,7 @@ func TestAPISubdomainsMissing_CB7(t *testing.T) {
         cfg := testConfig()
         router := gin.New()
         handler := handlers.NewAnalysisHandler(database, cfg, nil, nil)
+        t.Cleanup(handler.Close)
         router.GET("/api/subdomains/:id", handler.APISubdomains)
         w := httptest.NewRecorder()
         req := httptest.NewRequest(http.MethodGet, "/api/subdomains/999999", nil)

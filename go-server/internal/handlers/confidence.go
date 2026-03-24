@@ -15,8 +15,19 @@ import (
 )
 
 type ConfidenceHandler struct {
-        Config *config.Config
-        DB     *db.Database
+        Config     *config.Config
+        DB         *db.Database
+        auditStore AuditStore
+}
+
+func (h *ConfidenceHandler) auditQ() AuditStore {
+        if h.auditStore != nil {
+                return h.auditStore
+        }
+        if h.DB != nil {
+                return h.DB.Queries
+        }
+        return nil
 }
 
 func NewConfidenceHandler(cfg *config.Config, database *db.Database) *ConfidenceHandler {
@@ -27,12 +38,12 @@ func (h *ConfidenceHandler) Confidence(c *gin.Context) {
         nonce, _ := c.Get("csp_nonce")
         csrfToken, _ := c.Get("csrf_token")
         data := gin.H{
-                "AppVersion":      h.Config.AppVersion,
-                "MaintenanceNote": h.Config.MaintenanceNote,
-                "BetaPages":       h.Config.BetaPages,
-                "CspNonce":        nonce,
+                keyAppVersion:      h.Config.AppVersion,
+                keyMaintenanceNote: h.Config.MaintenanceNote,
+                keyBetaPages:       h.Config.BetaPages,
+                keyCspNonce:        nonce,
                 "CsrfToken":       csrfToken,
-                "ActivePage":      "confidence",
+                keyActivePage:      "confidence",
         }
 
         isDev := h.Config.IsDevEnvironment

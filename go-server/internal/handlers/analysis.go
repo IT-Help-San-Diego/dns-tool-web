@@ -23,6 +23,7 @@ import (
         "dnstool/go-server/internal/dnsclient"
         "dnstool/go-server/internal/icae"
         "dnstool/go-server/internal/icuae"
+        "dnstool/go-server/internal/logging"
         "dnstool/go-server/internal/scanner"
         "dnstool/go-server/internal/unified"
         "dnstool/go-server/internal/wayback"
@@ -60,6 +61,35 @@ type AnalysisHandler struct {
         Calibration     *icae.CalibrationEngine
         DimCharts       *icuae.DimensionCharts
         ProgressStore   *ProgressStore
+        analysisStore   AnalysisStore
+        statsExec       StatsExec
+}
+
+func (h *AnalysisHandler) store() AnalysisStore {
+        if h.analysisStore != nil {
+                return h.analysisStore
+        }
+        if h.DB != nil {
+                return h.DB.Queries
+        }
+        return nil
+}
+
+func (h *AnalysisHandler) execer() StatsExec {
+        if h.statsExec != nil {
+                return h.statsExec
+        }
+        if h.DB != nil {
+                return h.DB.Pool
+        }
+        return nil
+}
+
+func (h *AnalysisHandler) rawQueries() *dbq.Queries {
+        if h.DB != nil {
+                return h.DB.Queries
+        }
+        return nil
 }
 
 func NewAnalysisHandler(database *db.Database, cfg *config.Config, a *analyzer.Analyzer, historyCache *analyzer.DNSHistoryCache) *AnalysisHandler {
@@ -71,6 +101,12 @@ func NewAnalysisHandler(database *db.Database, cfg *config.Config, a *analyzer.A
                 Calibration:     icae.NewCalibrationEngine(),
                 DimCharts:       icuae.NewDimensionCharts(),
                 ProgressStore:   NewProgressStore(),
+        }
+}
+
+func (h *AnalysisHandler) Close() {
+        if h.ProgressStore != nil {
+                h.ProgressStore.Close()
         }
 }
 
@@ -90,7 +126,7 @@ func (h *AnalysisHandler) checkPrivateAccess(c *gin.Context, analysisID int32, p
         if !ok {
                 return false
         }
-        isOwner, err := h.DB.Queries.CheckAnalysisOwnership(c.Request.Context(), dbq.CheckAnalysisOwnershipParams{
+        isOwner, err := h.store().CheckAnalysisOwnership(c.Request.Context(), dbq.CheckAnalysisOwnershipParams{
                 AnalysisID: analysisID,
                 UserID:     userID,
         })
@@ -164,7 +200,7 @@ func (h *AnalysisHandler) viewAnalysisWithMode(c *gin.Context, mode string) {
         }
 
         ctx := c.Request.Context()
-        analysis, err := h.DB.Queries.GetAnalysisByID(ctx, int32(analysisID))
+        analysis, err := h.store().GetAnalysisByID(ctx, int32(analysisID))
         if err != nil {
                 h.renderErrorPage(c, http.StatusNotFound, nonce, csrfToken, mapKeyDanger, strAnalysisNotFound)
                 return
@@ -205,7 +241,7 @@ func (h *AnalysisHandler) viewAnalysisWithMode(c *gin.Context, mode string) {
         toolVersion := extractToolVersion(results)
         verifyCommands := analyzer.GenerateVerificationCommands(analysis.AsciiDomain, results)
         integrityHash := computeIntegrityHash(analysis, timestamp, toolVersion, h.Config.AppVersion, results)
-        rfcCount := analyzer.CountVerifiedRFCs(results)
+        rfcCount := analyzer.CountVerifiedStandards(results)
         currentHash := derefString(analysis.PostureHash)
         drift := h.detectHistoricalDrift(ctx, currentHash, analysis.Domain, analysis.ID, results)
         isSub, rootDom := extractRootDomain(analysis.AsciiDomain)
@@ -291,7 +327,7 @@ func (h *AnalysisHandler) Analyze(c *gin.Context) {
                 return
         }
 
-        if !dnsclient.ValidateDomain(domain) {
+        if !dnsclient.ValidateDomain(domain) && !analyzer.IsWeb3Input(domain) {
                 h.renderIndexFlash(c, nonce, csrfToken, mapKeyDanger, fmt.Sprintf("Invalid domain name: %s", domain))
                 return
         }
@@ -409,25 +445,37 @@ func (h *AnalysisHandler) analyzeAsync(c *gin.Context, domain, asciiDomain strin
         clientIP := c.ClientIP()
         countryCode, countryName := lookupCountry(clientIP)
 
+        traceID := token
+
         c.JSON(http.StatusAccepted, gin.H{
-                "token":  token,
-                "domain": asciiDomain,
+                "token":       token,
+                "domain":      asciiDomain,
+                "analysis_id": nil,
         })
 
         go func() {
                 ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
                 defer cancel()
 
+                slog.LogAttrs(ctx, slog.LevelInfo, "scan started",
+                        logging.ScanStarted(asciiDomain, traceID, 0)...)
+
+                scanStart := time.Now()
+
                 results := h.Analyzer.AnalyzeDomain(ctx, asciiDomain, customSelectors, analyzer.AnalysisOptions{
                         ExposureChecks:  exposureChecks,
-                        OnPhaseProgress: sp.MakeProgressCallback(),
+                        OnPhaseProgress: sp.MakeInstrumentedProgressCallback(asciiDomain, traceID),
                 })
                 analysisDuration := time.Since(sp.startTime).Seconds()
+                scanElapsedMs := time.Since(scanStart).Milliseconds()
 
                 h.applyConfidenceEngines(results)
+                h.enrichResultsAsync(results)
 
                 if failed, _ := isAnalysisFailure(results); failed {
                         go h.recordDailyStats(false, analysisDuration)
+                        slog.LogAttrs(ctx, slog.LevelError, "scan failed",
+                                logging.ScanFailed(asciiDomain, traceID, "analysis returned failure")...)
                         sp.MarkFailed("analysis failed")
                         return
                 }
@@ -438,6 +486,9 @@ func (h *AnalysisHandler) analyzeAsync(c *gin.Context, domain, asciiDomain strin
                 drift := h.detectDrift(ctx, devNull, domainExists, asciiDomain, postureHash, results)
 
                 h.snapshotICAEMetrics(ctx, results)
+
+                telRaw := results["_scan_telemetry"]
+                delete(results, "_scan_telemetry")
 
                 isPrivate := hasNovelSelectors && isAuthenticated
                 analysisID, _ := h.persistOrLogEphemeral(ctx, persistParams{
@@ -455,7 +506,7 @@ func (h *AnalysisHandler) analyzeAsync(c *gin.Context, domain, asciiDomain strin
                         devNull:           devNull,
                 })
 
-                h.storeTelemetry(ctx, analysisID, results, ephemeral)
+                h.storeTelemetryFromRaw(ctx, analysisID, telRaw, ephemeral)
 
                 analysisSuccess, _ := extractAnalysisError(results)
                 h.handlePostAnalysisSideEffectsAsync(ctx, sideEffectsParams{
@@ -475,8 +526,15 @@ func (h *AnalysisHandler) analyzeAsync(c *gin.Context, domain, asciiDomain strin
 
                 h.recordCurrencyIfEligible(ephemeral, domainExists, asciiDomain, results)
 
-                redirectURL := fmt.Sprintf("/analysis/%d", analysisID)
-                sp.MarkComplete(analysisID, redirectURL)
+                slog.LogAttrs(ctx, slog.LevelInfo, "scan completed",
+                        logging.ScanCompleted(asciiDomain, traceID, int(analysisID), scanElapsedMs)...)
+
+                if analysisID > 0 {
+                        redirectURL := fmt.Sprintf("/analysis/%d", analysisID)
+                        sp.MarkComplete(analysisID, redirectURL)
+                } else {
+                        sp.MarkComplete(0, "")
+                }
         }()
 }
 
@@ -488,11 +546,21 @@ func (h *AnalysisHandler) storeTelemetry(ctx context.Context, analysisID int32, 
         if !ok {
                 return
         }
+        if _, valid := telRaw.(analyzer.ScanTelemetry); !valid {
+                return
+        }
+        delete(results, "_scan_telemetry")
+        h.storeTelemetryFromRaw(ctx, analysisID, telRaw, ephemeral)
+}
+
+func (h *AnalysisHandler) storeTelemetryFromRaw(_ context.Context, analysisID int32, telRaw any, ephemeral bool) {
+        if ephemeral || analysisID == 0 || telRaw == nil {
+                return
+        }
         tel, ok := telRaw.(analyzer.ScanTelemetry)
         if !ok {
                 return
         }
-        delete(results, "_scan_telemetry")
 
         go func() {
                 bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -503,7 +571,7 @@ func (h *AnalysisHandler) storeTelemetry(ctx context.Context, analysisID int32, 
                                 errPtr = &t.Error
                         }
                         rc := int32(t.RecordCount)
-                        if err := h.DB.Queries.InsertPhaseTelemetry(bgCtx, dbq.InsertPhaseTelemetryParams{
+                        if err := h.store().InsertPhaseTelemetry(bgCtx, dbq.InsertPhaseTelemetryParams{
                                 AnalysisID:  analysisID,
                                 PhaseGroup:  t.PhaseGroup,
                                 PhaseTask:   t.PhaseTask,
@@ -515,7 +583,7 @@ func (h *AnalysisHandler) storeTelemetry(ctx context.Context, analysisID int32, 
                                 slog.Warn("Failed to store phase telemetry", "analysis_id", analysisID, "task", t.PhaseTask, "error", err)
                         }
                 }
-                if err := h.DB.Queries.InsertTelemetryHash(bgCtx, dbq.InsertTelemetryHashParams{
+                if err := h.store().InsertTelemetryHash(bgCtx, dbq.InsertTelemetryHashParams{
                         AnalysisID:      analysisID,
                         TotalDurationMs: int32(tel.TotalDurationMs),
                         PhaseCount:      int32(len(tel.Timings)),
@@ -535,7 +603,9 @@ func (h *AnalysisHandler) recordCurrencyIfEligible(ephemeral, domainExists bool,
                 return
         }
         if report, valid := cr.(icuae.CurrencyReport); valid {
-                go icuae.RecordScanResult(context.Background(), h.DB.Queries, asciiDomain, report, h.Config.AppVersion)
+                if q := h.rawQueries(); q != nil {
+                        go icuae.RecordScanResult(context.Background(), q, asciiDomain, report, h.Config.AppVersion)
+                }
         }
 }
 
@@ -568,9 +638,11 @@ func (h *AnalysisHandler) enrichViewDataMetrics(ctx context.Context, data gin.H,
         }
 
         var maturityLevel string
-        if icaeMetrics := icae.LoadReportMetrics(ctx, h.DB.Queries); icaeMetrics != nil {
-                data["ICAEMetrics"] = icaeMetrics
-                maturityLevel = icaeMetrics.OverallMaturity
+        if q := h.rawQueries(); q != nil {
+                if icaeMetrics := icae.LoadReportMetrics(ctx, q); icaeMetrics != nil {
+                        data["ICAEMetrics"] = icaeMetrics
+                        maturityLevel = icaeMetrics.OverallMaturity
+                }
         }
         var currencyScore float64
         if cr, ok := results[mapKeyCurrencyReport]; ok {
@@ -591,35 +663,68 @@ func (h *AnalysisHandler) enrichViewDataMetrics(ctx context.Context, data gin.H,
         }
 
         if analysisID > 0 {
-                if sugConfig := buildSuggestedConfig(ctx, h.DB.Queries, domain, analysisID); sugConfig != nil {
-                        data["SuggestedConfig"] = sugConfig
+                if q := h.rawQueries(); q != nil {
+                        if sugConfig := buildSuggestedConfig(ctx, q, domain, analysisID); sugConfig != nil {
+                                data["SuggestedConfig"] = sugConfig
+                        }
                 }
         }
 }
 
 func (h *AnalysisHandler) enrichFromSnapshot(ctx context.Context, data gin.H, results map[string]any, snap map[string]any, domain string, analysisID int32) {
-        if icaeMetrics := icae.LoadReportMetrics(ctx, h.DB.Queries); icaeMetrics != nil {
-                snappedMaturity, _ := snap["overall_maturity"].(string) //nolint:errcheck // zero-value fallback is intentional
-                if snappedMaturity != "" {
-                        icaeMetrics.OverallMaturity = snappedMaturity
-                        icaeMetrics.OverallMaturityDisplay = snappedMaturity
-                }
-                data["ICAEMetrics"] = icaeMetrics
+        h.enrichICAEFromSnapshot(ctx, data, snap)
+        enrichCurrencyReport(data, results)
+        enrichUnifiedConfidence(data, snap)
+        h.enrichSuggestedConfig(ctx, data, domain, analysisID)
+}
+
+func (h *AnalysisHandler) enrichICAEFromSnapshot(ctx context.Context, data gin.H, snap map[string]any) {
+        q := h.rawQueries()
+        if q == nil {
+                return
         }
-        if cr, ok := results[mapKeyCurrencyReport]; ok {
-                if report, hydrated := icuae.HydrateCurrencyReport(cr); hydrated {
-                        data["CurrencyReport"] = report
-                }
+        icaeMetrics := icae.LoadReportMetrics(ctx, q)
+        if icaeMetrics == nil {
+                return
         }
-        if uc, ok := snap["unified_confidence"]; ok {
-                if ucMap, valid := uc.(map[string]any); valid {
-                        data["UnifiedConfidence"] = restoreUnifiedConfidence(ucMap)
-                }
+        snappedMaturity, _ := snap["overall_maturity"].(string) //nolint:errcheck // zero-value fallback is intentional
+        if snappedMaturity != "" {
+                icaeMetrics.OverallMaturity = snappedMaturity
+                icaeMetrics.OverallMaturityDisplay = snappedMaturity
         }
-        if analysisID > 0 {
-                if sugConfig := buildSuggestedConfig(ctx, h.DB.Queries, domain, analysisID); sugConfig != nil {
-                        data["SuggestedConfig"] = sugConfig
-                }
+        data["ICAEMetrics"] = icaeMetrics
+}
+
+func enrichCurrencyReport(data gin.H, results map[string]any) {
+        cr, ok := results[mapKeyCurrencyReport]
+        if !ok {
+                return
+        }
+        if report, hydrated := icuae.HydrateCurrencyReport(cr); hydrated {
+                data["CurrencyReport"] = report
+        }
+}
+
+func enrichUnifiedConfidence(data gin.H, snap map[string]any) {
+        uc, ok := snap["unified_confidence"]
+        if !ok {
+                return
+        }
+        if ucMap, valid := uc.(map[string]any); valid {
+                data["UnifiedConfidence"] = restoreUnifiedConfidence(ucMap)
+        }
+}
+
+func (h *AnalysisHandler) enrichSuggestedConfig(ctx context.Context, data gin.H, domain string, analysisID int32) {
+        if analysisID <= 0 {
+                return
+        }
+        q := h.rawQueries()
+        if q == nil {
+                return
+        }
+        if sugConfig := buildSuggestedConfig(ctx, q, domain, analysisID); sugConfig != nil {
+                data["SuggestedConfig"] = sugConfig
         }
 }
 
@@ -661,8 +766,10 @@ func restoreUnifiedConfidence(m map[string]any) unified.UnifiedConfidence {
 func (h *AnalysisHandler) snapshotICAEMetrics(ctx context.Context, results map[string]any) {
         snapshot := map[string]any{}
 
-        if icaeMetrics := icae.LoadReportMetrics(ctx, h.DB.Queries); icaeMetrics != nil {
-                snapshot["overall_maturity"] = icaeMetrics.OverallMaturity
+        if q := h.rawQueries(); q != nil {
+                if icaeMetrics := icae.LoadReportMetrics(ctx, q); icaeMetrics != nil {
+                        snapshot["overall_maturity"] = icaeMetrics.OverallMaturity
+                }
         }
 
         var currencyScore float64
@@ -731,7 +838,7 @@ func (h *AnalysisHandler) detectHistoricalDrift(ctx context.Context, currentHash
         if currentHash == "" {
                 return driftInfo{}
         }
-        prevRow, prevErr := h.DB.Queries.GetPreviousAnalysisForDriftBefore(ctx, dbq.GetPreviousAnalysisForDriftBeforeParams{
+        prevRow, prevErr := h.store().GetPreviousAnalysisForDriftBefore(ctx, dbq.GetPreviousAnalysisForDriftBeforeParams{
                 Domain: domain,
                 ID:     analysisID,
         })
@@ -772,7 +879,7 @@ func extractAuthInfo(c *gin.Context) (bool, int32) {
 func (h *AnalysisHandler) detectDrift(ctx context.Context, devNull, domainExists bool, asciiDomain, postureHash string, results map[string]any) driftInfo {
         drift := driftInfo{}
         if !devNull && domainExists {
-                prevRow, prevErr := h.DB.Queries.GetPreviousAnalysisForDrift(ctx, asciiDomain)
+                prevRow, prevErr := h.store().GetPreviousAnalysisForDrift(ctx, asciiDomain)
                 if prevErr == nil {
                         drift = computeDriftFromPrev(postureHash, prevAnalysisSnapshot{
                                 Hash:           prevRow.PostureHash,
@@ -804,7 +911,7 @@ type persistParams struct {
 
 func (h *AnalysisHandler) persistOrLogEphemeral(ctx context.Context, p persistParams) (int32, string) {
         isSuccess, _ := extractAnalysisError(p.results) //nolint:errcheck // error message not needed here
-        if p.ephemeral || p.devNull || (!p.domainExists && isSuccess) {
+        if persist, _ := shouldPersistResult(p.ephemeral, p.devNull, p.domainExists, isSuccess); !persist {
                 logEphemeralReason(p.asciiDomain, p.devNull, p.domainExists)
                 return 0, time.Now().UTC().Format(strUtc)
         }
@@ -852,13 +959,15 @@ func (h *AnalysisHandler) handlePostAnalysisSideEffects(ctx context.Context, c *
                 if p.drift.Detected {
                         go h.persistDriftEvent(p.asciiDomain, p.analysisID, p.drift, p.postureHash)
                 }
-                if p.analysisSuccess && !p.ephemeral && !p.isPrivate && !p.isScanFlagged {
+                if shouldArchiveToWayback(p.analysisID, p.analysisSuccess, p.ephemeral, p.isPrivate, p.isScanFlagged) {
                         go h.archiveToWayback(p.analysisID, p.asciiDomain)
                 }
         }
 
-        if !p.ephemeral && p.domainExists {
-                icae.EvaluateAndRecord(c.Request.Context(), h.DB.Queries, h.Config.AppVersion)
+        if shouldRunICAE(p.ephemeral, p.domainExists) {
+                if q := h.rawQueries(); q != nil {
+                        icae.EvaluateAndRecord(c.Request.Context(), q, h.Config.AppVersion)
+                }
                 recordAnalyticsCollector(c, p.asciiDomain)
         }
 
@@ -871,13 +980,15 @@ func (h *AnalysisHandler) handlePostAnalysisSideEffectsAsync(ctx context.Context
                 if p.drift.Detected {
                         go h.persistDriftEvent(p.asciiDomain, p.analysisID, p.drift, p.postureHash)
                 }
-                if p.analysisSuccess && !p.ephemeral && !p.isPrivate && !p.isScanFlagged {
+                if shouldArchiveToWayback(p.analysisID, p.analysisSuccess, p.ephemeral, p.isPrivate, p.isScanFlagged) {
                         go h.archiveToWayback(p.analysisID, p.asciiDomain)
                 }
         }
 
-        if !p.ephemeral && p.domainExists {
-                icae.EvaluateAndRecord(ctx, h.DB.Queries, h.Config.AppVersion)
+        if shouldRunICAE(p.ephemeral, p.domainExists) {
+                if q := h.rawQueries(); q != nil {
+                        icae.EvaluateAndRecord(ctx, q, h.Config.AppVersion)
+                }
         }
 
         go h.recordDailyStats(p.analysisSuccess, p.analysisDuration)
@@ -890,7 +1001,7 @@ func (h *AnalysisHandler) archiveToWayback(analysisID int32, domain string) {
                 slog.Warn("Wayback Machine archival failed", "analysis_id", analysisID, "domain", domain, mapKeyError, result.Err)
                 return
         }
-        err := h.DB.Queries.UpdateWaybackURL(context.Background(), dbq.UpdateWaybackURLParams{
+        err := h.store().UpdateWaybackURL(context.Background(), dbq.UpdateWaybackURLParams{
                 ID:         analysisID,
                 WaybackUrl: &result.URL,
         })
@@ -900,11 +1011,11 @@ func (h *AnalysisHandler) archiveToWayback(analysisID int32, domain string) {
 }
 
 func (h *AnalysisHandler) recordUserAnalysisAsync(p sideEffectsParams) {
-        if !p.isAuthenticated || p.userID <= 0 {
+        if !shouldRecordUserAssociation(p.isAuthenticated, p.userID) {
                 return
         }
         go func() {
-                err := h.DB.Queries.InsertUserAnalysis(context.Background(), dbq.InsertUserAnalysisParams{
+                err := h.store().InsertUserAnalysis(context.Background(), dbq.InsertUserAnalysisParams{
                         UserID:     p.userID,
                         AnalysisID: p.analysisID,
                 })
@@ -915,6 +1026,10 @@ func (h *AnalysisHandler) recordUserAnalysisAsync(p sideEffectsParams) {
 }
 
 func (h *AnalysisHandler) recordDailyStats(success bool, duration float64) {
+        exec := h.execer()
+        if exec == nil {
+                return
+        }
         ctx := context.Background()
         today := time.Now().UTC().Truncate(24 * time.Hour)
 
@@ -926,7 +1041,7 @@ func (h *AnalysisHandler) recordDailyStats(success bool, duration float64) {
                 failedInt = 1
         }
 
-        _, err := h.DB.Pool.Exec(ctx,
+        _, err := exec.Exec(ctx,
                 `INSERT INTO analysis_stats (date, total_analyses, successful_analyses, failed_analyses, unique_domains, avg_analysis_time, created_at, updated_at)
                  VALUES ($1, 1, $2, $3, 0, $4, NOW(), NOW())
                  ON CONFLICT (date) DO UPDATE SET
@@ -972,7 +1087,7 @@ func (h *AnalysisHandler) buildAnalyzeViewData(c *gin.Context, nonce, csrfToken 
         ctx := c.Request.Context()
         verifyCommands := analyzer.GenerateVerificationCommands(v.asciiDomain, v.results)
         integrityHash := analyzer.ReportIntegrityHash(v.asciiDomain, v.analysisID, v.timestamp, h.Config.AppVersion, v.results)
-        rfcCount := analyzer.CountVerifiedRFCs(v.results)
+        rfcCount := analyzer.CountVerifiedStandards(v.results)
 
         isSub, rootDom := extractRootDomain(v.asciiDomain)
         emailScope := h.resolveEmailScope(ctx, isSub, rootDom, v.asciiDomain, v.results)
@@ -1016,8 +1131,10 @@ func (h *AnalysisHandler) buildAnalyzeViewData(c *gin.Context, nonce, csrfToken 
                 "SubdomainEmailScope":  emailScope,
                 "WaybackURL":           "",
         }
-        if icaeMetrics := icae.LoadReportMetrics(ctx, h.DB.Queries); icaeMetrics != nil {
-                analyzeData["ICAEMetrics"] = icaeMetrics
+        if q := h.rawQueries(); q != nil {
+                if icaeMetrics := icae.LoadReportMetrics(ctx, q); icaeMetrics != nil {
+                        analyzeData["ICAEMetrics"] = icaeMetrics
+                }
         }
         if cr, ok := v.results[mapKeyCurrencyReport]; ok {
                 if report, hydrated := icuae.HydrateCurrencyReport(cr); hydrated {
@@ -1071,18 +1188,9 @@ func (h *AnalysisHandler) persistDriftEvent(domain string, analysisID int32, dri
                 return
         }
 
-        severity := "info"
-        for _, f := range drift.Fields {
-                if f.Severity == mapKeyCritical {
-                        severity = mapKeyCritical
-                        break
-                }
-                if f.Severity == mapKeyWarning && severity != mapKeyCritical {
-                        severity = mapKeyWarning
-                }
-        }
+        severity := computeDriftSeverity(drift.Fields)
 
-        driftRow, insertErr := h.DB.Queries.InsertDriftEvent(context.Background(), dbq.InsertDriftEventParams{
+        driftRow, insertErr := h.store().InsertDriftEvent(context.Background(), dbq.InsertDriftEventParams{
                 Domain:         domain,
                 AnalysisID:     analysisID,
                 PrevAnalysisID: drift.PrevID,
@@ -1102,7 +1210,7 @@ func (h *AnalysisHandler) persistDriftEvent(domain string, analysisID int32, dri
 
 func (h *AnalysisHandler) queueDriftNotifications(domain string, driftEventID int32) {
         ctx := context.Background()
-        endpoints, err := h.DB.Queries.ListEndpointsForWatchedDomain(ctx, domain)
+        endpoints, err := h.store().ListEndpointsForWatchedDomain(ctx, domain)
         if err != nil {
                 slog.Error("Failed to list endpoints for watched domain", mapKeyDomain, domain, mapKeyError, err)
                 return
@@ -1111,7 +1219,7 @@ func (h *AnalysisHandler) queueDriftNotifications(domain string, driftEventID in
                 return
         }
         for _, ep := range endpoints {
-                _, qErr := h.DB.Queries.InsertDriftNotification(ctx, dbq.InsertDriftNotificationParams{
+                _, qErr := h.store().InsertDriftNotification(ctx, dbq.InsertDriftNotificationParams{
                         DriftEventID: driftEventID,
                         EndpointID:   ep.EndpointID,
                         Status:       "pending",
@@ -1223,11 +1331,53 @@ func (h *AnalysisHandler) APIDNSHistory(c *gin.Context) {
 }
 
 func (h *AnalysisHandler) enrichResultsNoHistory(_ *gin.Context, _ string, results map[string]any) {
+        h.enrichResultsAsync(results)
+}
+
+func (h *AnalysisHandler) enrichResultsAsync(results map[string]any) {
         if rem, ok := results["remediation"].(map[string]any); ok {
                 results["remediation"] = analyzer.EnrichRemediationWithRFCMeta(rem)
         }
 
         results["rfc_metadata"] = analyzer.GetAllRFCMetadata()
+}
+
+func shouldArchiveToWayback(analysisID int32, analysisSuccess, ephemeral, isPrivate, isScanFlagged bool) bool {
+        return analysisID > 0 && analysisSuccess && !ephemeral && !isPrivate && !isScanFlagged
+}
+
+func computeDriftSeverity(fields []analyzer.PostureDiffField) string {
+        severity := "info"
+        for _, f := range fields {
+                if f.Severity == mapKeyCritical {
+                        return mapKeyCritical
+                }
+                if f.Severity == mapKeyWarning {
+                        severity = mapKeyWarning
+                }
+        }
+        return severity
+}
+
+func shouldPersistResult(ephemeral, devNull, domainExists, analysisSuccess bool) (persist bool, reason string) {
+        if devNull {
+                return false, "devnull"
+        }
+        if ephemeral {
+                return false, "ephemeral"
+        }
+        if !domainExists && analysisSuccess {
+                return false, "nonexistent_domain"
+        }
+        return true, ""
+}
+
+func shouldRunICAE(ephemeral, domainExists bool) bool {
+        return !ephemeral && domainExists
+}
+
+func shouldRecordUserAssociation(isAuthenticated bool, userID int32) bool {
+        return isAuthenticated && userID > 0
 }
 
 func resultsDomainExists(results map[string]any) bool {
@@ -1370,15 +1520,17 @@ func (h *AnalysisHandler) buildAnalysisJSON(ctx context.Context, analysis dbq.Do
         if currencyReport != nil {
                 provenance[mapKeyCurrencyReport] = currencyReport
         }
-        if icaeMetrics := icae.LoadReportMetrics(ctx, h.DB.Queries); icaeMetrics != nil {
-                provenance["icae_summary"] = map[string]interface{}{
-                        "maturity":        icaeMetrics.OverallMaturity,
-                        "pass_rate":       icaeMetrics.PassRate,
-                        "total_cases":     icaeMetrics.TotalAllCases,
-                        "total_passes":    icaeMetrics.TotalPasses,
-                        "total_runs":      icaeMetrics.TotalRuns,
-                        "days_running":    icaeMetrics.DaysRunning,
-                        "protocols_count": icaeMetrics.TotalProtocols,
+        if q := h.rawQueries(); q != nil {
+                if icaeMetrics := icae.LoadReportMetrics(ctx, q); icaeMetrics != nil {
+                        provenance["icae_summary"] = map[string]interface{}{
+                                "maturity":        icaeMetrics.OverallMaturity,
+                                "pass_rate":       icaeMetrics.PassRate,
+                                "total_cases":     icaeMetrics.TotalAllCases,
+                                "total_passes":    icaeMetrics.TotalPasses,
+                                "total_runs":      icaeMetrics.TotalRuns,
+                                "days_running":    icaeMetrics.DaysRunning,
+                                "protocols_count": icaeMetrics.TotalProtocols,
+                        }
                 }
         }
 
@@ -1463,7 +1615,7 @@ func (h *AnalysisHandler) loadAnalysisForAPI(c *gin.Context) (dbq.DomainAnalysis
         }
 
         ctx := c.Request.Context()
-        analysis, err := h.DB.Queries.GetAnalysisByID(ctx, int32(analysisID))
+        analysis, err := h.store().GetAnalysisByID(ctx, int32(analysisID))
         if err != nil {
                 c.JSON(http.StatusNotFound, gin.H{mapKeyError: strAnalysisNotFound})
                 return dbq.DomainAnalysis{}, false
@@ -1637,7 +1789,7 @@ func (h *AnalysisHandler) saveAnalysis(ctx context.Context, p saveAnalysisInput)
                 ScanIp:               scanIP,
         }
 
-        row, err := h.DB.Queries.InsertAnalysis(ctx, params)
+        row, err := h.store().InsertAnalysis(ctx, params)
         if err != nil {
                 slog.Error("Failed to save analysis", mapKeyDomain, p.domain, mapKeyError, err)
                 return 0, time.Now().UTC().Format(strUtc)
@@ -1647,12 +1799,14 @@ func (h *AnalysisHandler) saveAnalysis(ctx context.Context, p saveAnalysisInput)
                 go func() {
                         bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
                         defer cancel()
-                        _ = h.DB.Queries.UpsertDomainIndex(bgCtx, dbq.UpsertDomainIndexParams{
+                        if err := h.store().UpsertDomainIndex(bgCtx, dbq.UpsertDomainIndexParams{
                                 Domain:    p.domain,
                                 HasDane:   analysisHasProtocol(p.results, "dane_analysis"),
                                 HasDnssec: analysisHasProtocol(p.results, "dnssec_analysis"),
                                 HasMtaSts: analysisHasProtocol(p.results, "mta_sts_analysis"),
-                        })
+                        }); err != nil {
+                                slog.Warn("domain index upsert failed", "domain", p.domain, "error", err)
+                        }
                 }()
         }
 

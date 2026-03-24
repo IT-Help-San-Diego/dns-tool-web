@@ -151,8 +151,8 @@ func (q *Queries) ICuAEGetRecentTrend(ctx context.Context, limit int32) ([]ICuAE
 }
 
 const iCuAEInsertDimensionScore = `-- name: ICuAEInsertDimensionScore :exec
-INSERT INTO icuae_dimension_scores (scan_id, dimension, score, grade, record_types_evaluated)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO icuae_dimension_scores (scan_id, dimension, score, grade, record_types_evaluated, record_types_list)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type ICuAEInsertDimensionScoreParams struct {
@@ -160,7 +160,8 @@ type ICuAEInsertDimensionScoreParams struct {
 	Dimension            string   `db:"dimension" json:"dimension"`
 	Score                float32  `db:"score" json:"score"`
 	Grade                string   `db:"grade" json:"grade"`
-	RecordTypesEvaluated []string `db:"record_types_evaluated" json:"record_types_evaluated"`
+	RecordTypesEvaluated int32    `db:"record_types_evaluated" json:"record_types_evaluated"`
+	RecordTypesList      []string `db:"record_types_list" json:"record_types_list"`
 }
 
 func (q *Queries) ICuAEInsertDimensionScore(ctx context.Context, arg ICuAEInsertDimensionScoreParams) error {
@@ -170,6 +171,7 @@ func (q *Queries) ICuAEInsertDimensionScore(ctx context.Context, arg ICuAEInsert
 		arg.Score,
 		arg.Grade,
 		arg.RecordTypesEvaluated,
+		arg.RecordTypesList,
 	)
 	return err
 }

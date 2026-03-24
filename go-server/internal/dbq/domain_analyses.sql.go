@@ -59,7 +59,7 @@ func (q *Queries) CountFailedAnalyses(ctx context.Context) (int64, error) {
 const countHashedAnalyses = `-- name: CountHashedAnalyses :one
 SELECT COUNT(*) FROM domain_analyses
 WHERE posture_hash IS NOT NULL
-  AND posture_hash != ''
+  AND posture_hash <> ''
   AND analysis_success = TRUE
   AND private = FALSE
   AND scan_flag = FALSE
@@ -264,7 +264,7 @@ WHERE domain = $1
   AND id < $2
   AND analysis_success = TRUE
   AND posture_hash IS NOT NULL
-  AND posture_hash != ''
+  AND posture_hash <> ''
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -291,7 +291,7 @@ SELECT id, posture_hash, full_results, created_at FROM domain_analyses
 WHERE domain = $1
   AND analysis_success = TRUE
   AND posture_hash IS NOT NULL
-  AND posture_hash != ''
+  AND posture_hash <> ''
   AND full_results IS NOT NULL
 ORDER BY created_at DESC
 LIMIT 1
@@ -322,7 +322,7 @@ WHERE domain = $1
   AND id < $2
   AND analysis_success = TRUE
   AND posture_hash IS NOT NULL
-  AND posture_hash != ''
+  AND posture_hash <> ''
   AND full_results IS NOT NULL
 ORDER BY created_at DESC
 LIMIT 1
@@ -357,7 +357,7 @@ SELECT posture_hash, created_at FROM domain_analyses
 WHERE domain = $1
   AND analysis_success = TRUE
   AND posture_hash IS NOT NULL
-  AND posture_hash != ''
+  AND posture_hash <> ''
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -422,7 +422,7 @@ func (q *Queries) GetRecentAnalysisByDomain(ctx context.Context, domain string) 
 const getRecentHashedAnalyses = `-- name: GetRecentHashedAnalyses :many
 SELECT id, domain, posture_hash, full_results, created_at FROM domain_analyses
 WHERE posture_hash IS NOT NULL
-  AND posture_hash != ''
+  AND posture_hash <> ''
   AND full_results IS NOT NULL
   AND analysis_success = TRUE
 ORDER BY created_at DESC
@@ -618,7 +618,7 @@ func (q *Queries) ListAnalysesByDomain(ctx context.Context, arg ListAnalysesByDo
 const listCountryDistribution = `-- name: ListCountryDistribution :many
 SELECT country_code, country_name, COUNT(id) AS count
 FROM domain_analyses
-WHERE country_code IS NOT NULL AND country_code != ''
+WHERE country_code IS NOT NULL AND country_code <> ''
 GROUP BY country_code, country_name
 ORDER BY COUNT(id) DESC
 LIMIT $1
@@ -700,7 +700,7 @@ func (q *Queries) ListFailedAnalyses(ctx context.Context, arg ListFailedAnalyses
 const listHashedAnalyses = `-- name: ListHashedAnalyses :many
 SELECT id, domain, posture_hash, created_at FROM domain_analyses
 WHERE posture_hash IS NOT NULL
-  AND posture_hash != ''
+  AND posture_hash <> ''
   AND analysis_success = TRUE
   AND private = FALSE
   AND scan_flag = FALSE
