@@ -30,8 +30,18 @@ func TestSecurityHeadersStaticPath(t *testing.T) {
         if w.Header().Get("X-Content-Type-Options") != "nosniff" {
                 t.Error("expected X-Content-Type-Options nosniff for static path")
         }
-        if w.Header().Get("Content-Security-Policy") != "" {
-                t.Error("static paths should not have CSP header")
+        csp := w.Header().Get("Content-Security-Policy")
+        if csp == "" {
+                t.Error("static paths should have a restrictive CSP header")
+        }
+        if !strings.Contains(csp, "default-src 'none'") {
+                t.Error("static CSP should contain default-src 'none'")
+        }
+        if !strings.Contains(csp, "script-src 'none'") {
+                t.Error("static CSP should contain script-src 'none'")
+        }
+        if !strings.Contains(csp, "style-src 'unsafe-inline'") {
+                t.Error("static CSP should allow unsafe-inline styles for SVG compatibility")
         }
         if w.Header().Get("X-Frame-Options") != "" {
                 t.Error("static paths should not have X-Frame-Options")
@@ -479,6 +489,34 @@ func TestBuildCSPSignaturePath(t *testing.T) {
 
         if !strings.Contains(csp, "frame-src 'self'") {
                 t.Error("CSP for /signature should have frame-src 'self'")
+        }
+}
+
+func TestDocsPDFFrameAncestorsSelf(t *testing.T) {
+        router := gin.New()
+        router.Use(RequestContext())
+        router.Use(SecurityHeaders(false))
+        router.GET("/docs/dns-tool-methodology.pdf", func(c *gin.Context) {
+                c.String(http.StatusOK, "ok")
+        })
+
+        w := httptest.NewRecorder()
+        req := httptest.NewRequest("GET", "/docs/dns-tool-methodology.pdf", nil)
+        router.ServeHTTP(w, req)
+
+        if w.Code != http.StatusOK {
+                t.Fatalf("expected 200, got %d", w.Code)
+        }
+        csp := w.Header().Get("Content-Security-Policy")
+        if !strings.Contains(csp, "frame-ancestors 'self'") {
+                t.Errorf("CSP for /docs/ should have frame-ancestors 'self', got: %s", csp)
+        }
+        if strings.Contains(csp, "frame-ancestors 'none'") {
+                t.Error("CSP for /docs/ should NOT have frame-ancestors 'none'")
+        }
+        xfo := w.Header().Get("X-Frame-Options")
+        if xfo != "SAMEORIGIN" {
+                t.Errorf("X-Frame-Options for /docs/ should be SAMEORIGIN, got: %s", xfo)
         }
 }
 

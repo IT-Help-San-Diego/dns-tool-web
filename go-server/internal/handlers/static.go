@@ -84,18 +84,27 @@ func (h *StaticHandler) BIMILogoSVG(c *gin.Context) {
         c.File(filepath.Join(h.StaticDir, "bimi-logo.svg"))
 }
 
-func (h *StaticHandler) MethodologyPDF(c *gin.Context) {
+func (h *StaticHandler) servePDF(c *gin.Context, filename string) {
         c.Header(headerContentType, "application/pdf")
         c.Header(headerCacheControl, cachePublicDay)
-        c.Header("Content-Disposition", "inline; filename=\"dns-tool-methodology.pdf\"")
-        c.File(filepath.Join(h.StaticDir, "docs", "dns-tool-methodology.pdf"))
+        c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
+        c.File(filepath.Join(h.StaticDir, "docs", filename))
+}
+
+func (h *StaticHandler) MethodologyPDF(c *gin.Context) {
+        h.servePDF(c, "dns-tool-methodology.pdf")
 }
 
 func (h *StaticHandler) FoundationsPDF(c *gin.Context) {
-        c.Header(headerContentType, "application/pdf")
-        c.Header(headerCacheControl, cachePublicDay)
-        c.Header("Content-Disposition", "inline; filename=\"philosophical-foundations.pdf\"")
-        c.File(filepath.Join(h.StaticDir, "docs", "philosophical-foundations.pdf"))
+        h.servePDF(c, "philosophical-foundations.pdf")
+}
+
+func (h *StaticHandler) ManifestoPDF(c *gin.Context) {
+        h.servePDF(c, "founders-manifesto.pdf")
+}
+
+func (h *StaticHandler) CommStandardsPDF(c *gin.Context) {
+        h.servePDF(c, "communication-standards.pdf")
 }
 
 func (h *StaticHandler) SitemapXML(c *gin.Context) {
@@ -119,11 +128,21 @@ func (h *StaticHandler) SitemapXML(c *gin.Context) {
                 {h.BaseURL + "/roadmap", mapKeyWeekly, sitemapPriorityLow},
                 {h.BaseURL + "/architecture", mapKeyMonthly, sitemapPriorityLow},
                 {h.BaseURL + "/topology", mapKeyMonthly, sitemapPriorityLow},
+                {h.BaseURL + "/manifesto", mapKeyMonthly, sitemapPriorityLow},
+                {h.BaseURL + "/communication-standards", mapKeyMonthly, sitemapPriorityLow},
                 {h.BaseURL + "/ttl-tuner", mapKeyMonthly, sitemapPriorityLow},
                 {h.BaseURL + "/ede", mapKeyMonthly, sitemapPriorityLow},
                 {h.BaseURL + "/roe", mapKeyMonthly, sitemapPriorityLow},
+                {h.BaseURL + "/contact", mapKeyMonthly, sitemapPriorityMedium},
+                {h.BaseURL + "/privacy", mapKeyMonthly, sitemapPriorityMedium},
                 {h.BaseURL + "/security-policy", mapKeyMonthly, "0.4"},
                 {h.BaseURL + "/changelog", mapKeyMonthly, "0.3"},
+                {h.BaseURL + "/video/forgotten-domain", mapKeyMonthly, sitemapPriorityMedium},
+                {h.BaseURL + "/reference-library", mapKeyMonthly, sitemapPriorityMedium},
+                {h.BaseURL + "/corpus", mapKeyMonthly, sitemapPriorityMedium},
+                {h.BaseURL + "/publications", mapKeyMonthly, sitemapPriorityMedium},
+                {h.BaseURL + "/case-study/", mapKeyMonthly, sitemapPriorityMedium},
+                {h.BaseURL + "/case-study/intelligence-dmarc", mapKeyMonthly, sitemapPriorityMedium},
         }
 
         xml := `<?xml version="1.0" encoding="UTF-8"?>` + "\n"

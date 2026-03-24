@@ -71,7 +71,7 @@ func TestIsSameOrigin_CB8(t *testing.T) {
 }
 
 func TestExtractContext_CB8(t *testing.T) {
-        body := "prefix...AKIAXXXXXXXXXXXXXXXX...suffix"
+        body := "prefix...TESTKEYXXXXXXXXXXXXXXXX...suffix" // gitleaks:allow
         ctx := extractContext(body, 9, 29)
         if ctx == "" {
                 t.Fatal("expected non-empty context")
@@ -131,7 +131,7 @@ func TestIsMinifiedJSFalsePositive_CB8(t *testing.T) {
 }
 
 func TestEvaluateMatch_CB8(t *testing.T) {
-        body := "var key = 'AKIAI0SFODNN7ZQRSTUB'"
+        body := "var key = 'AKIAI0SFODNN7ZQRSTUB'" //gitleaks:allow
         pat := secretPatterns[0]
         loc := pat.Re.FindStringIndex(body)
         if loc == nil {
@@ -158,7 +158,7 @@ func TestEvaluateMatch_CB8(t *testing.T) {
 
 func TestScanContent_CB8(t *testing.T) {
         scanner := &SecretScanner{}
-        body := `var key = "AKIAIOSFODNN7EXAMPLE1";`
+        body := `var key = "AKIAIOSFODNN7EXAMPLE1";` // gitleaks:allow
         findings := scanner.scanContent(body, "https://example.com/app.js", nil)
         _ = findings
 }
@@ -179,7 +179,7 @@ func TestNewSecretScanner_CB8(t *testing.T) {
 }
 
 func TestAnalyzeDNSInfrastructureOSS_CB8(t *testing.T) {
-        a := New()
+        a := New(WithInitialIANAFetch(false))
         result := a.AnalyzeDNSInfrastructure("example.com", map[string]any{})
         if result == nil {
                 t.Fatal("expected non-nil result")
@@ -190,7 +190,7 @@ func TestAnalyzeDNSInfrastructureOSS_CB8(t *testing.T) {
 }
 
 func TestGetHostingInfoOSS_CB8(t *testing.T) {
-        a := New()
+        a := New(WithInitialIANAFetch(false))
         results := map[string]any{
                 "basic_records": map[string]any{
                         "NS":    []string{"ns1.google.com"},
@@ -208,7 +208,7 @@ func TestGetHostingInfoOSS_CB8(t *testing.T) {
 }
 
 func TestDetectEmailSecurityManagementOSS_CB8(t *testing.T) {
-        a := New()
+        a := New(WithInitialIANAFetch(false))
         result := a.DetectEmailSecurityManagement(nil, nil, nil, nil, "example.com", nil)
         if result == nil {
                 t.Fatal("expected non-nil result")
@@ -245,7 +245,7 @@ func TestStubFunctions_CB8(t *testing.T) {
 }
 
 func TestAnalyzerStubMethods_CB8(t *testing.T) {
-        a := New()
+        a := New(WithInitialIANAFetch(false))
         a.resolveNSRecords("example.com", []string{"ns1.example.com"})
         a.detectHostingFromPTR(nil, nil)
         a.resolveDNSHosting("example.com", nil)

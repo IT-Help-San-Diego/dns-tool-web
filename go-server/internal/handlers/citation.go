@@ -15,6 +15,8 @@ import (
         "dnstool/go-server/internal/config"
         "dnstool/go-server/internal/db"
         "dnstool/go-server/internal/dbq"
+        "dnstool/go-server/internal/icae"
+        "dnstool/go-server/internal/icuae"
 
         "github.com/gin-gonic/gin"
         "github.com/goccy/go-yaml"
@@ -36,6 +38,7 @@ type citationCFF struct {
 type cffAuthor struct {
         FamilyNames string `yaml:"family-names"`
         GivenNames  string `yaml:"given-names"`
+        ORCID       string `yaml:"orcid"`
 }
 
 func loadCitationCFF() *citationCFF {
@@ -55,9 +58,20 @@ func loadCitationCFF() *citationCFF {
 }
 
 type CitationHandler struct {
-        Config   *config.Config
-        Registry *citation.Registry
-        DB       *db.Database
+        Config      *config.Config
+        Registry    *citation.Registry
+        DB          *db.Database
+        lookupStore LookupStore
+}
+
+func (h *CitationHandler) store() LookupStore {
+        if h.lookupStore != nil {
+                return h.lookupStore
+        }
+        if h.DB != nil {
+                return h.DB.Queries
+        }
+        return nil
 }
 
 func NewCitationHandler(cfg *config.Config, reg *citation.Registry, database *db.Database) *CitationHandler {
@@ -147,6 +161,144 @@ func (h *CitationHandler) resolveSoftwareMeta() (title, version, doi, url, autho
         return
 }
 
+func (h *CitationHandler) ResearchAPI(c *gin.Context) {
+        title, version, doi, url, authorFamily, authorGiven, date := h.resolveSoftwareMeta()
+
+        cff := loadCitationCFF()
+        orcid := "0009-0000-5237-9065"
+        license := "BUSL-1.1"
+        if cff != nil {
+                if len(cff.Authors) > 0 && cff.Authors[0].ORCID != "" {
+                        orcid = strings.TrimPrefix(cff.Authors[0].ORCID, "https://orcid.org/")
+                }
+        }
+
+        analysisCases := icae.AnalysisTestCases()
+        collectionCases := icae.CollectionTestCases()
+        icaeTotalCases := len(analysisCases) + len(collectionCases)
+
+        protoCounts := icae.CountCasesByProtocol()
+        protocols := make([]gin.H, 0, len(protoCounts))
+        for proto, pc := range protoCounts {
+                protocols = append(protocols, gin.H{
+                        "protocol":   proto,
+                        "analysis":   pc.Analysis,
+                        "collection": pc.Collection,
+                        "total":      pc.Total,
+                })
+        }
+
+        icuaeInv := icuae.GetTestInventory()
+        icuaeCategories := make([]gin.H, 0, len(icuaeInv.Categories))
+        for _, cat := range icuaeInv.Categories {
+                icuaeCategories = append(icuaeCategories, gin.H{
+                        "name":     cat.Name,
+                        "standard": cat.Standard,
+                        "cases":    cat.Cases,
+                })
+        }
+
+        citationReg := citation.Global()
+        allEntries := citationReg.All()
+
+        c.JSON(http.StatusOK, gin.H{
+                "label":       "Published Research Software",
+                "title":       title,
+                "version":     version,
+                "concept_doi": "10.5281/zenodo.18854899",
+                "latest_doi":  doi,
+                "orcid":       orcid,
+                "author":      authorGiven + " " + authorFamily,
+                "license":     license,
+                "date":        date,
+                "url":         url,
+                "citation":    fmt.Sprintf("Balboa, C. J. (%s). %s (Version %s) [Computer software]. %s", date[:4], title, version, "https://doi.org/"+doi),
+                "engines": gin.H{
+                        "icae": gin.H{
+                                "name":             "Intelligence Confidence Audit Engine",
+                                "total_cases":      icaeTotalCases,
+                                "analysis_cases":   len(analysisCases),
+                                "collection_cases": len(collectionCases),
+                                "maturity_tiers":   []string{"Development", "Verified", "Consistent", "Gold", "Gold Master"},
+                                "protocols":        protocols,
+                        },
+                        "icuae": gin.H{
+                                "name":             "Intelligence Currency Assurance Engine",
+                                "total_cases":      icuaeInv.TotalCases,
+                                "total_dimensions": icuaeInv.TotalDimensions,
+                                "categories":       icuaeCategories,
+                        },
+                },
+                "authorities_registry": gin.H{
+                        "total_entries": len(allEntries),
+                        "url":           url + "/api/authorities",
+                },
+                "documents": []gin.H{
+                        {
+                                "title":       "DNS Tool: Confidence-Scored Analysis of Domain Security Infrastructure",
+                                "type":        "methodology",
+                                "url":         url + "/methodology",
+                                "description": "Primary methodology document covering ICAE/ICuAE confidence framework, multi-resolver consensus, and RFC-grounded analysis engines.",
+                        },
+                        {
+                                "title":       "Philosophical Foundations for Security Analysis Communication",
+                                "type":        "companion",
+                                "url":         url + "/foundations",
+                                "description": "Companion document covering Aristotelian rhetoric, Socratic verification, scotopic interface design, and narrative architecture.",
+                        },
+                },
+                "endpoints": gin.H{
+                        "cite_page":         url + "/cite",
+                        "software_citation": url + "/cite/software",
+                        "authorities":       url + "/api/authorities",
+                        "research":          url + "/api/research",
+                },
+        })
+}
+
+func (h *CitationHandler) CitePage(c *gin.Context) {
+        title, version, doi, url, authorFamily, authorGiven, date := h.resolveSoftwareMeta()
+
+        cff := loadCitationCFF()
+        orcid := "0009-0000-5237-9065"
+        if cff != nil && len(cff.Authors) > 0 && cff.Authors[0].ORCID != "" {
+                orcid = strings.TrimPrefix(cff.Authors[0].ORCID, "https://orcid.org/")
+        }
+
+        analysisCases := icae.AnalysisTestCases()
+        collectionCases := icae.CollectionTestCases()
+        icuaeInv := icuae.GetTestInventory()
+        protoCounts := icae.CountCasesByProtocol()
+
+        citationReg := citation.Global()
+        allEntries := citationReg.All()
+
+        nonce, _ := c.Get("csp_nonce")
+
+        c.HTML(http.StatusOK, "cite.html", gin.H{
+                "AppVersion":      h.Config.AppVersion,
+                "MaintenanceNote": h.Config.MaintenanceNote,
+                "BetaPages":       h.Config.BetaPages,
+                "CspNonce":        nonce,
+                "Title":           title,
+                "Version":         version,
+                "DOI":             doi,
+                "URL":             url,
+                "AuthorFamily":    authorFamily,
+                "AuthorGiven":     authorGiven,
+                "ORCID":           orcid,
+                "Date":            date,
+                "Year":            date[:4],
+                "ICAETotal":       len(analysisCases) + len(collectionCases),
+                "ICAEAnalysis":    len(analysisCases),
+                "ICAECollection":  len(collectionCases),
+                "ICAEProtocols":   len(protoCounts),
+                "ICuAETotal":      icuaeInv.TotalCases,
+                "ICuAEDimensions": icuaeInv.TotalDimensions,
+                "AuthoritiesTotal": len(allEntries),
+        })
+}
+
 func (h *CitationHandler) AnalysisCitation(c *gin.Context) {
         format := c.DefaultQuery("format", "csljson")
         if format != "bibtex" && format != "ris" && format != "csljson" {
@@ -161,7 +313,7 @@ func (h *CitationHandler) AnalysisCitation(c *gin.Context) {
                 return
         }
 
-        analysis, err := h.DB.Queries.GetAnalysisByID(c.Request.Context(), int32(id))
+        analysis, err := h.store().GetAnalysisByID(c.Request.Context(), int32(id))
         if err != nil {
                 c.JSON(http.StatusNotFound, gin.H{"error": "analysis not found"})
                 return
@@ -211,7 +363,7 @@ func (h *CitationHandler) checkCitationAccess(c *gin.Context, analysisID int32, 
         if !ok {
                 return false
         }
-        isOwner, err := h.DB.Queries.CheckAnalysisOwnership(c.Request.Context(), dbq.CheckAnalysisOwnershipParams{
+        isOwner, err := h.store().CheckAnalysisOwnership(c.Request.Context(), dbq.CheckAnalysisOwnershipParams{
                 AnalysisID: analysisID,
                 UserID:     userID,
         })

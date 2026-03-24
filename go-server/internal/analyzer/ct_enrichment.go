@@ -93,7 +93,9 @@ func (j *CTEnrichmentJob) run(ctx context.Context) {
 
         var enrichedDomains []string
         if len(budget.DomainsEnriched) > 0 {
-                _ = json.Unmarshal(budget.DomainsEnriched, &enrichedDomains)
+                if err := json.Unmarshal(budget.DomainsEnriched, &enrichedDomains); err != nil {
+                        slog.Warn("CT enrichment: failed to unmarshal enriched domains", "error", err)
+                }
         }
         enrichedSet := make(map[string]bool, len(enrichedDomains))
         for _, d := range enrichedDomains {
@@ -123,22 +125,21 @@ func (j *CTEnrichmentJob) enrichTargets(ctx context.Context, targets []enrichmen
                 budget.CallsUsed++
                 remaining--
 
-                domainsJSON, _ := json.Marshal(append(enrichedDomains, td.Domain))
-                if err := j.budgetDB.UpsertSTBudget(ctx, dbq.UpsertSTBudgetParams{
-                        MonthKey:        monthKey,
-                        CallsUsed:       budget.CallsUsed,
-                        DomainsEnriched: domainsJSON,
-                }); err != nil {
-                        slog.Warn("CT enrichment: failed to persist budget before API call, aborting", mapKeyError, err)
-                        break
-                }
-
                 ok := j.enrichSingleTarget(ctx, td, &enrichedDomains, enrichedSet)
                 if !ok {
                         break
                 }
                 if enrichedSet[td.Domain] {
                         enriched++
+                        domainsJSON, _ := json.Marshal(enrichedDomains)
+                        if err := j.budgetDB.UpsertSTBudget(ctx, dbq.UpsertSTBudgetParams{
+                                MonthKey:        monthKey,
+                                CallsUsed:       budget.CallsUsed,
+                                DomainsEnriched: domainsJSON,
+                        }); err != nil {
+                                slog.Warn("CT enrichment: failed to persist budget after success, aborting", mapKeyError, err)
+                                break
+                        }
                 }
         }
         return enriched, remaining
@@ -151,8 +152,6 @@ func (j *CTEnrichmentJob) enrichSingleTarget(ctx context.Context, td enrichmentT
                         mapKeyDomain, td.Domain,
                         "rate_limited", status != nil && status.RateLimited,
                 )
-                *enrichedDomains = append(*enrichedDomains, td.Domain)
-                enrichedSet[td.Domain] = true
                 return !(status != nil && status.RateLimited)
         }
 

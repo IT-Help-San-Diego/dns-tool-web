@@ -4,60 +4,93 @@
 package db
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
-	"time"
+        "context"
+        "fmt"
+        "log/slog"
+        "net/url"
+        "os"
+        "time"
 
-	"dnstool/go-server/internal/dbq"
+        "dnstool/go-server/internal/dbq"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+        "github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Database struct {
-	Pool    *pgxpool.Pool
-	Queries *dbq.Queries
+        Pool    *pgxpool.Pool
+        Queries *dbq.Queries
 }
 
 func Connect(databaseURL string) (*Database, error) {
-	config, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse database URL: %w", err)
-	}
+        if os.Getenv("REPLIT_DEPLOYMENT") != "" {
+                if u, err := url.Parse(databaseURL); err == nil && u.Hostname() == "helium" {
+                        return nil, fmt.Errorf("misconfiguration: production deployment is using development database host 'helium'; set DATABASE_URL in production app secrets to the production database connection string")
+                }
+        }
+        const maxRetries = 5
+        const retryDelay = 3 * time.Second
+        var lastErr error
+        for attempt := 1; attempt <= maxRetries; attempt++ {
+                db, err := connectWithPoolSize(databaseURL, 10, 2)
+                if err == nil {
+                        return db, nil
+                }
+                lastErr = err
+                if attempt < maxRetries {
+                        slog.Warn("Database connection attempt failed, retrying",
+                                "attempt", attempt,
+                                "max_retries", maxRetries,
+                                "retry_in", retryDelay.String(),
+                                "error", err)
+                        time.Sleep(retryDelay)
+                }
+        }
+        return nil, lastErr
+}
 
-	config.MaxConns = 10
-	config.MinConns = 2
-	config.MaxConnLifetime = 5 * time.Minute
-	config.MaxConnIdleTime = 2 * time.Minute
-	config.HealthCheckPeriod = 30 * time.Second
+func ConnectForTests(databaseURL string) (*Database, error) {
+        return connectWithPoolSize(databaseURL, 2, 0)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+func connectWithPoolSize(databaseURL string, maxConns, minConns int32) (*Database, error) {
+        config, err := pgxpool.ParseConfig(databaseURL)
+        if err != nil {
+                return nil, fmt.Errorf("failed to parse database URL: %w", err)
+        }
 
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
-	}
+        config.MaxConns = maxConns
+        config.MinConns = minConns
+        config.MaxConnLifetime = 5 * time.Minute
+        config.MaxConnIdleTime = 2 * time.Minute
+        config.HealthCheckPeriod = 30 * time.Second
 
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
 
-	slog.Info("Database connected successfully")
-	return &Database{
-		Pool:    pool,
-		Queries: dbq.New(pool),
-	}, nil
+        pool, err := pgxpool.NewWithConfig(ctx, config)
+        if err != nil {
+                return nil, fmt.Errorf("failed to connect to database: %w", err)
+        }
+
+        if err := pool.Ping(ctx); err != nil {
+                pool.Close()
+                return nil, fmt.Errorf("failed to ping database: %w", err)
+        }
+
+        slog.Info("Database connected successfully")
+        return &Database{
+                Pool:    pool,
+                Queries: dbq.New(pool),
+        }, nil
 }
 
 func (d *Database) Close() {
-	if d.Pool != nil {
-		d.Pool.Close()
-		slog.Info("Database connection closed")
-	}
+        if d.Pool != nil {
+                d.Pool.Close()
+                slog.Info("Database connection closed")
+        }
 }
 
 func (d *Database) HealthCheck(ctx context.Context) error {
-	return d.Pool.Ping(ctx)
+        return d.Pool.Ping(ctx)
 }

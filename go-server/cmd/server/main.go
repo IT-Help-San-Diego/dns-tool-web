@@ -27,6 +27,7 @@ import (
         "dnstool/go-server/internal/dbq"
         "dnstool/go-server/internal/dnsclient"
         "dnstool/go-server/internal/handlers"
+        "dnstool/go-server/internal/logging"
         "dnstool/go-server/internal/middleware"
         "dnstool/go-server/internal/notifier"
         "dnstool/go-server/internal/scanner"
@@ -76,8 +77,17 @@ func init() {
 }
 
 func main() {
-        slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-                Level: slog.LevelDebug,
+        slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+                Level: slog.LevelInfo,
+                ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+                        if a.Value.Kind() == slog.KindString {
+                                v := a.Value.String()
+                                if strings.Contains(v, "@") || strings.Contains(v, "webhook") || strings.Contains(v, "token=") {
+                                        return slog.Attr{Key: a.Key, Value: slog.StringValue("[REDACTED_EARLY]")}
+                                }
+                        }
+                        return a
+                },
         })))
 
         earlyPort := os.Getenv("PORT")
@@ -135,9 +145,53 @@ func main() {
         database, err := db.Connect(cfg.DatabaseURL)
         if err != nil {
                 slog.Error("Failed to connect to database", mapKeyError, err)
-                os.Exit(1)
+                handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                        if r.URL.Path == "/healthz" {
+                                w.Header().Set("Content-Type", "application/json")
+                                w.WriteHeader(http.StatusOK)
+                                w.Write([]byte(`{"status":"degraded","reason":"database_unavailable"}`))
+                                return
+                        }
+                        w.Header().Set("Content-Type", "text/html; charset=utf-8")
+                        w.Header().Set("Retry-After", "30")
+                        w.WriteHeader(http.StatusServiceUnavailable)
+                        w.Write([]byte(`<!DOCTYPE html><html><head><title>DNS Tool — Maintenance</title><meta http-equiv="refresh" content="30"><style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d1117;color:#c9d1d9}div{text-align:center;max-width:480px;padding:2rem}.icon{font-size:3rem;margin-bottom:1rem}h1{color:#58a6ff;margin:0 0 .5rem}p{color:#8b949e;line-height:1.6}</style></head><body><div><div class="icon">🦉</div><h1>DNS Tool</h1><p>The service is temporarily unavailable while the database connection is being restored. This page will automatically refresh.</p></div></body></html>`))
+                }))
+                slog.Warn("Running in DEGRADED mode — serving maintenance page, waiting for database")
+                go func() {
+                        for {
+                                time.Sleep(15 * time.Second)
+                                slog.Info("Retrying database connection in degraded mode...")
+                                if retryDB, retryErr := db.Connect(cfg.DatabaseURL); retryErr == nil {
+                                        slog.Info("Database reconnected in degraded mode — full restart required")
+                                        retryDB.Close()
+                                }
+                        }
+                }()
+                quit := make(chan os.Signal, 1)
+                signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+                <-quit
+                slog.Info("Shutdown signal received in degraded mode")
+                shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+                defer shutdownCancel()
+                srv.Shutdown(shutdownCtx)
+                return
         }
         defer database.Close()
+
+        database.RunSeedMigrations("go-server/db/migrations")
+
+        logger, err := logging.Setup(database.Pool, cfg.DiscordWebhookURL)
+        if err != nil {
+                slog.Warn("Structured logger setup failed, continuing with default", mapKeyError, err)
+        } else {
+                defer logger.Close()
+                slog.Info("Structured logging initialized",
+                        logging.AttrEvent, logging.EventStartup,
+                        logging.AttrCategory, logging.CategorySystem,
+                        "sinks", "stdout+jsonl+db+discord",
+                )
+        }
 
         gin.SetMode(gin.ReleaseMode)
         router := gin.New()
@@ -232,6 +286,7 @@ func main() {
         ctStore := analyzer.NewPgCTStore(database.Queries)
         dnsAnalyzer := analyzer.New(analyzer.WithCTStore(ctStore))
         dnsAnalyzer.SMTPProbeMode = cfg.SMTPProbeMode
+        dnsAnalyzer.IPFSProbeMode = cfg.IPFSProbeMode
         dnsAnalyzer.ProbeAPIURL = cfg.ProbeAPIURL
         dnsAnalyzer.ProbeAPIKey = cfg.ProbeAPIKey
         for _, p := range cfg.Probes {
@@ -242,7 +297,7 @@ func main() {
                         Key:   p.Key,
                 })
         }
-        slog.Info("DNS analyzer initialized with telemetry", "smtp_probe_mode", cfg.SMTPProbeMode, "probe_count", len(cfg.Probes))
+        slog.Info("DNS analyzer initialized with telemetry", "smtp_probe_mode", cfg.SMTPProbeMode, "ipfs_probe_mode", cfg.IPFSProbeMode, "probe_count", len(cfg.Probes))
 
         analyzer.InitIETFMetadata()
         analyzer.ScheduleRFCRefresh()
@@ -334,7 +389,16 @@ func main() {
 
         telemetryHandler := handlers.NewTelemetryHandler(database, cfg)
         router.GET("/ops/telemetry", middleware.RequireAdmin(), telemetryHandler.Dashboard)
+        router.GET("/admin/telemetry", middleware.RequireAdmin(), telemetryHandler.Dashboard)
         router.GET("/api/telemetry/verify/:id", middleware.RequireAdmin(), telemetryHandler.VerifyHash)
+
+        logsHandler := handlers.NewLogsHandler(database, cfg)
+        router.GET("/ops/logs", middleware.RequireAdmin(), logsHandler.Dashboard)
+        router.GET("/admin/logs", middleware.RequireAdmin(), logsHandler.Dashboard)
+        router.GET("/admin/logs/export", middleware.RequireAdmin(), logsHandler.ExportJSONL)
+
+        pipelineHandler := handlers.NewPipelineHandler(database, cfg)
+        router.GET("/ops/pipeline", middleware.RequireAdmin(), pipelineHandler.Observatory)
 
         router.GET("/snapshot/:domain", snapshotHandler.Snapshot)
 
@@ -378,6 +442,8 @@ func main() {
         citationReg := citation.Global()
         citationHandler := handlers.NewCitationHandler(cfg, citationReg, database)
         router.GET("/api/authorities", citationHandler.Authorities)
+        router.GET("/api/research", citationHandler.ResearchAPI)
+        router.GET("/cite", citationHandler.CitePage)
         router.GET("/cite/software", citationHandler.SoftwareCitation)
         router.GET("/analysis/:id/cite", citationHandler.AnalysisCitation)
 
@@ -403,8 +469,17 @@ func main() {
         securityPolicyHandler := handlers.NewSecurityPolicyHandler(cfg)
         router.GET("/security-policy", securityPolicyHandler.SecurityPolicy)
 
+        privacyHandler := handlers.NewPrivacyHandler(cfg)
+        router.GET("/privacy", privacyHandler.Privacy)
+
         aboutHandler := handlers.NewAboutHandler(cfg)
         router.GET("/about", aboutHandler.About)
+
+        contactHandler := handlers.NewContactHandler(cfg)
+        router.GET("/contact", contactHandler.Contact)
+
+        refLibHandler := handlers.NewReferenceLibraryHandler(cfg)
+        router.GET("/reference-library", refLibHandler.ReferenceLibrary)
 
         roadmapHandler := handlers.NewRoadmapHandler(cfg)
         router.GET("/roadmap", roadmapHandler.Roadmap)
@@ -412,19 +487,42 @@ func main() {
         approachHandler := handlers.NewApproachHandler(cfg)
         router.GET("/approach", approachHandler.Approach)
 
-        edeHandler := handlers.NewEDEHandler(cfg)
+        edeHandler := handlers.NewEDEHandler(database, cfg)
         router.GET("/ede", edeHandler.EDE)
+
+        manifestoHandler := handlers.NewManifestoHandler(cfg)
+        router.GET("/manifesto", manifestoHandler.Manifesto)
+
+        owlSemaphoreHandler := handlers.NewOwlSemaphoreHandler(cfg)
+        router.GET("/owl-semaphore", owlSemaphoreHandler.OwlSemaphore)
+        router.GET("/owl-layers", owlSemaphoreHandler.OwlLayers)
+
+        commStdsHandler := handlers.NewCommunicationStandardsHandler(cfg)
+        router.GET("/communication-standards", commStdsHandler.CommunicationStandards)
 
         router.GET("/methodology", staticHandler.MethodologyPDF)
         router.GET("/docs/dns-tool-methodology.pdf", staticHandler.MethodologyPDF)
         router.GET("/foundations", staticHandler.FoundationsPDF)
         router.GET("/docs/philosophical-foundations.pdf", staticHandler.FoundationsPDF)
+        router.GET("/manifesto-pdf", staticHandler.ManifestoPDF)
+        router.GET("/docs/founders-manifesto.pdf", staticHandler.ManifestoPDF)
+        router.GET("/communication-standards-pdf", staticHandler.CommStandardsPDF)
+        router.GET("/docs/communication-standards.pdf", staticHandler.CommStandardsPDF)
+
+        corpusHandler := handlers.NewCorpusHandler(cfg)
+        router.GET("/corpus", corpusHandler.Corpus)
 
         videoHandler := handlers.NewVideoHandler(cfg)
+        router.GET("/publications", videoHandler.Publications)
         router.GET("/video/forgotten-domain", videoHandler.ForgottenDomain)
+        router.GET("/case-study/", videoHandler.CaseStudyIndex)
+        router.GET("/case-study/intelligence-dmarc", videoHandler.IntelligenceDMARC)
 
         roeHandler := handlers.NewROEHandler(cfg)
         router.GET("/roe", roeHandler.ROE)
+
+        blackSiteHandler := handlers.NewBlackSiteHandler(database, cfg)
+        router.GET("/black-site", blackSiteHandler.BlackSite)
 
         brandColorsHandler := handlers.NewBrandColorsHandler(cfg)
         router.GET("/brand-colors", brandColorsHandler.BrandColors)
